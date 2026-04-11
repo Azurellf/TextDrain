@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"textdrain/internal/config"
+	"textdrain/internal/infra/environment"
 )
 
 type transcribeOptions struct {
@@ -76,7 +78,7 @@ func newTranscribeCommand(cfg config.Config) *cobra.Command {
 	return cmd
 }
 
-func newDoctorCommand() *cobra.Command {
+func newDoctorCommand(paths config.Paths, cfg config.Config) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check the local TextDrain environment",
@@ -88,8 +90,14 @@ func newDoctorCommand() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintln(cmd.OutOrStdout(), "doctor checks are not implemented yet")
-			return err
+			report := environment.Check(cmd.Context(), paths, cfg)
+			if err := printDoctorReport(cmd, report); err != nil {
+				return err
+			}
+			if !report.Healthy() {
+				return NewDependencyError("environment checks failed")
+			}
+			return nil
 		},
 	}
 }
@@ -166,5 +174,114 @@ func listModels(cmd *cobra.Command, modelDir string) error {
 		}
 	}
 
+	return nil
+}
+
+func printDoctorReport(cmd *cobra.Command, report environment.Report) error {
+	out := cmd.OutOrStdout()
+
+	if _, err := fmt.Fprintln(out, "TextDrain environment check"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(out, ""); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(out, "Tools:"); err != nil {
+		return err
+	}
+	for _, tool := range []environment.ToolCheck{report.Tools.YTDLP, report.Tools.FFmpeg, report.Tools.WhisperCLI} {
+		if err := printToolCheck(out, tool); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintln(out, ""); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(out, "Models:"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "  default_model=%s\n", report.Model.Name); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "  model_dir=%s\n", report.Model.Dir); err != nil {
+		return err
+	}
+	if report.Model.Found {
+		if _, err := fmt.Fprintf(out, "  model_file=ok path=%s\n", report.Model.Path); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintf(out, "  model_file=missing reason=%s\n", report.Model.Error); err != nil {
+			return err
+		}
+		for _, candidate := range report.Model.Candidates {
+			if _, err := fmt.Fprintf(out, "  candidate=%s\n", candidate); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintf(out, "  advice=%s\n", report.Model.Advice); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintln(out, ""); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(out, "Paths:"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "  config_file=%s\n", report.Paths.ConfigFile); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "  cache=%s\n", report.Paths.CacheDir); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "  jobs=%s\n", report.Paths.JobsDir); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "  models=%s\n", report.Paths.ModelDir); err != nil {
+		return err
+	}
+
+	if report.Healthy() {
+		_, err := fmt.Fprintln(out, "\nStatus: ok")
+		return err
+	}
+	_, err := fmt.Fprintln(out, "\nStatus: failed")
+	return err
+}
+
+func printToolCheck(out io.Writer, tool environment.ToolCheck) error {
+	status := "missing"
+	if tool.Found && tool.Executable {
+		status = "ok"
+	} else if tool.Found {
+		status = "not_executable"
+	}
+
+	if _, err := fmt.Fprintf(out, "  %s=%s\n", tool.Name, status); err != nil {
+		return err
+	}
+	if tool.Path != "" {
+		if _, err := fmt.Fprintf(out, "    path=%s\n", tool.Path); err != nil {
+			return err
+		}
+	}
+	if tool.Version != "" {
+		if _, err := fmt.Fprintf(out, "    version=%s\n", tool.Version); err != nil {
+			return err
+		}
+	}
+	if tool.Error != "" {
+		if _, err := fmt.Fprintf(out, "    reason=%s\n", tool.Error); err != nil {
+			return err
+		}
+	}
+	if status != "ok" {
+		if _, err := fmt.Fprintf(out, "    advice=%s\n", tool.Advice); err != nil {
+			return err
+		}
+	}
 	return nil
 }

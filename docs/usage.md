@@ -12,7 +12,7 @@ At this stage, the project mainly provides:
 - Version display
 - Config file loading
 - `transcribe` command argument and flag parsing
-- `doctor` command entry point
+- `doctor` dependency and model environment checks
 - `models --list` command for local model directory inspection
 - Hidden path inspection command for local directories
 
@@ -83,7 +83,14 @@ Current output is a validated request summary. The actual media pipeline is impl
 textdrain doctor
 ```
 
-The command is available now. Dependency and model checks are implemented in the next MVP task.
+The command checks:
+
+- Whether `yt-dlp`, `ffmpeg`, and `whisper-cli` are available and executable
+- Version output for each external tool
+- The configured model directory and default model file
+- Default config, cache, jobs, and model paths
+
+If a dependency or model file is missing, the command prints a repair suggestion and exits with the dependency error code.
 
 ### List Local Models
 

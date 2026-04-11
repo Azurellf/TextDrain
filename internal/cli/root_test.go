@@ -74,6 +74,63 @@ func TestDoctorRejectsArguments(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsMissingDependencies(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	output, err := executeTestCommand(t, []string{"doctor"}, testConfig(t))
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+	if ExitCode(err) != ExitDependency {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitDependency)
+	}
+
+	for _, want := range []string{
+		"yt-dlp=missing",
+		"ffmpeg=missing",
+		"whisper-cli=missing",
+		"model_file=missing",
+		"Status: failed",
+		"advice=",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("doctor output does not contain %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestDoctorReportsHealthyEnvironment(t *testing.T) {
+	binDir := t.TempDir()
+	writeFakeExecutable(t, filepath.Join(binDir, "yt-dlp"), "yt-dlp 2026.01.01")
+	writeFakeExecutable(t, filepath.Join(binDir, "ffmpeg"), "ffmpeg version 7.0")
+	writeFakeExecutable(t, filepath.Join(binDir, "whisper-cli"), "whisper-cli 1.7.0")
+	t.Setenv("PATH", binDir)
+
+	cfg := testConfig(t)
+	modelPath := filepath.Join(cfg.ModelDir, "ggml-small.bin")
+	if err := os.WriteFile(modelPath, []byte("model"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := executeTestCommand(t, []string{"doctor"}, cfg)
+	if err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, output)
+	}
+
+	for _, want := range []string{
+		"yt-dlp=ok",
+		"version=yt-dlp 2026.01.01",
+		"ffmpeg=ok",
+		"whisper-cli=ok",
+		"model_file=ok",
+		"Status: ok",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("doctor output does not contain %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestModelsListShowsFilesInModelDir(t *testing.T) {
 	cfg := testConfig(t)
 	if err := os.WriteFile(filepath.Join(cfg.ModelDir, "ggml-base.bin"), []byte("model"), 0o644); err != nil {
@@ -141,5 +198,14 @@ func testPaths(t *testing.T) config.Paths {
 		CacheDir:   cacheDir,
 		JobsDir:    filepath.Join(cacheDir, "jobs"),
 		ModelsDir:  filepath.Join(cacheDir, "models"),
+	}
+}
+
+func writeFakeExecutable(t *testing.T, path string, version string) {
+	t.Helper()
+
+	content := "#!/bin/sh\nprintf '%s\\n' '" + version + "'\n"
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
 	}
 }

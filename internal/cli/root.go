@@ -44,7 +44,7 @@ func NewRootCommand(_ context.Context, opts RootOptions) *cobra.Command {
 
 	cmd.AddCommand(newPathsCommand(opts.Paths, cfg))
 	cmd.AddCommand(newTranscribeCommand(cfg))
-	cmd.AddCommand(newDoctorCommand())
+	cmd.AddCommand(newDoctorCommand(opts.Paths, cfg))
 	cmd.AddCommand(newModelsCommand(cfg))
 
 	return cmd
