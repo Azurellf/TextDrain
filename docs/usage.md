@@ -10,6 +10,7 @@ At this stage, the project mainly provides:
 
 - CLI entry and help output
 - Version display
+- Config file loading
 - Hidden path inspection command for local directories
 
 The end-to-end transcription workflow described in the design documents is not implemented yet. This guide focuses on what you can use today.
@@ -58,6 +59,44 @@ Expected output includes:
 - Available commands
 - Global flags such as `--help` and `--version`
 
+## Configuration
+
+TextDrain reads configuration from:
+
+```text
+~/.config/textdrain/config.toml
+```
+
+The file is optional. When it does not exist, TextDrain runs with built-in defaults.
+
+Supported MVP keys:
+
+```toml
+model = "small"
+language = "auto"
+output_formats = ["txt", "srt", "vtt", "json"]
+keep_intermediate_files = false
+model_dir = "/Users/<your-name>/.cache/textdrain/models"
+jobs_dir = "/Users/<your-name>/.cache/textdrain/jobs"
+```
+
+Default values:
+
+- `model`: `small`
+- `language`: `auto`
+- `output_formats`: `txt`, `srt`, `vtt`, `json`
+- `keep_intermediate_files`: `false`
+- `model_dir`: `~/.cache/textdrain/models`
+- `jobs_dir`: `~/.cache/textdrain/jobs`
+
+Config precedence is:
+
+1. CLI overrides
+2. `config.toml`
+3. Built-in defaults
+
+The current command surface does not expose user-facing CLI config flags yet. The override layer is implemented internally for the upcoming `transcribe` command.
+
 ### Show Version
 
 ```bash
@@ -82,6 +121,7 @@ Example output:
 
 ```text
 config=/Users/<your-name>/.config/textdrain
+config_file=/Users/<your-name>/.config/textdrain/config.toml
 cache=/Users/<your-name>/.cache/textdrain
 jobs=/Users/<your-name>/.cache/textdrain/jobs
 models=/Users/<your-name>/.cache/textdrain/models
@@ -121,7 +161,6 @@ textdrain completion fish
 - No audio extraction pipeline yet
 - No offline ASR integration yet
 - No export workflow yet
-- No config file loading yet
 
 Planned capabilities are documented in:
 

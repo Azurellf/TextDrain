@@ -10,11 +10,17 @@ import (
 )
 
 type RootOptions struct {
-	Paths config.Paths
-	UI    *UI
+	Paths  config.Paths
+	Config config.Config
+	UI     *UI
 }
 
 func NewRootCommand(_ context.Context, opts RootOptions) *cobra.Command {
+	cfg := opts.Config
+	if cfg.ModelDir == "" && cfg.JobsDir == "" {
+		cfg = config.Default(opts.Paths)
+	}
+
 	cmd := &cobra.Command{
 		Use:   "textdrain",
 		Short: "Offline media transcription CLI",
@@ -33,24 +39,25 @@ func NewRootCommand(_ context.Context, opts RootOptions) *cobra.Command {
 		cmd.SetErr(opts.UI.Stderr)
 	}
 
-	cmd.AddCommand(newPathsCommand(opts.Paths))
+	cmd.AddCommand(newPathsCommand(opts.Paths, cfg))
 
 	return cmd
 }
 
-func newPathsCommand(paths config.Paths) *cobra.Command {
+func newPathsCommand(paths config.Paths, cfg config.Config) *cobra.Command {
 	return &cobra.Command{
 		Use:    "paths",
-		Short:  "Show default directories",
+		Short:  "Show configured directories",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, err := fmt.Fprintf(
 				cmd.OutOrStdout(),
-				"config=%s\ncache=%s\njobs=%s\nmodels=%s\n",
+				"config=%s\nconfig_file=%s\ncache=%s\njobs=%s\nmodels=%s\n",
 				paths.ConfigDir,
+				paths.ConfigFile,
 				paths.CacheDir,
-				paths.JobsDir,
-				paths.ModelsDir,
+				cfg.JobsDir,
+				cfg.ModelDir,
 			)
 			return err
 		},

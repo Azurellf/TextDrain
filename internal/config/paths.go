@@ -14,10 +14,11 @@ const (
 )
 
 type Paths struct {
-	ConfigDir string
-	CacheDir  string
-	JobsDir   string
-	ModelsDir string
+	ConfigDir  string
+	ConfigFile string
+	CacheDir   string
+	JobsDir    string
+	ModelsDir  string
 }
 
 func DefaultPaths() Paths {
@@ -30,9 +31,10 @@ func DefaultPaths() Paths {
 	cacheDir := filepath.Join(homeDir, cacheDirName, appName)
 
 	return Paths{
-		ConfigDir: configDir,
-		CacheDir:  cacheDir,
-		JobsDir:   filepath.Join(cacheDir, jobsDirName),
-		ModelsDir: filepath.Join(cacheDir, modelsDirName),
+		ConfigDir:  configDir,
+		ConfigFile: filepath.Join(configDir, "config.toml"),
+		CacheDir:   cacheDir,
+		JobsDir:    filepath.Join(cacheDir, jobsDirName),
+		ModelsDir:  filepath.Join(cacheDir, modelsDirName),
 	}
 }
