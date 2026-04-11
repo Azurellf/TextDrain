@@ -11,6 +11,7 @@ import (
 
 	"textdrain/internal/config"
 	"textdrain/internal/infra/environment"
+	"textdrain/internal/infra/ingestion"
 )
 
 type transcribeOptions struct {
@@ -54,10 +55,21 @@ func newTranscribeCommand(cfg config.Config) *cobra.Command {
 				return NewParameterError("--output cannot be empty")
 			}
 
-			_, err := fmt.Fprintf(
+			resolver := ingestion.NewResolver(opts.outputDir, opts.language)
+			asset, err := resolver.Resolve(cmd.Context(), opts.input)
+			if err != nil {
+				return NewParameterError("resolve input: %s", err)
+			}
+
+			_, err = fmt.Fprintf(
 				cmd.OutOrStdout(),
-				"input=%s\nlanguage=%s\nmodel=%s\noutput=%s\nkeep_intermediate=%t\n",
+				"input=%s\nsource_type=%s\ntitle=%s\nsite=%s\nwork_dir=%s\nmedia_path=%s\nlanguage=%s\nmodel=%s\noutput=%s\nkeep_intermediate=%t\n",
 				opts.input,
+				asset.SourceType,
+				asset.Title,
+				asset.Site,
+				asset.WorkDir,
+				asset.MediaPath,
 				opts.language,
 				opts.model,
 				opts.outputDir,

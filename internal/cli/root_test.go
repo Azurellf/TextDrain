@@ -54,6 +54,38 @@ func TestTranscribeParsesFlags(t *testing.T) {
 	}
 }
 
+func TestTranscribeResolvesLocalMediaAsset(t *testing.T) {
+	cfg := testConfig(t)
+	mediaPath := filepath.Join(t.TempDir(), "Local Clip.mp4")
+	if err := os.WriteFile(mediaPath, []byte("media"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := executeTestCommand(t, []string{
+		"transcribe",
+		mediaPath,
+		"--lang",
+		"en",
+		"--output",
+		filepath.Join(t.TempDir(), "out"),
+	}, cfg)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"source_type=local_file",
+		"title=Local Clip",
+		"site=local",
+		"media_path=" + mediaPath,
+		"language=en",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("transcribe output does not contain %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestTranscribeRejectsUnsupportedLanguage(t *testing.T) {
 	_, err := executeTestCommand(t, []string{"transcribe", "media.mp4", "--lang", "fr"}, testConfig(t))
 	if err == nil {
