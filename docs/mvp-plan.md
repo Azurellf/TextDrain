@@ -8,7 +8,7 @@
 
 ## Implementation Tasks
 
-### 1. 项目初始化
+### 1. 项目初始化（已完成）
 
 - 建立 Go 项目骨架：`cmd/textdrain`、`internal/app`、`internal/domain`、`internal/infra`、`internal/cli`。
 - 初始化 `go.mod`，确定 Go 版本为 `1.24+`。
@@ -20,7 +20,7 @@
   - 模型目录 `~/.cache/textdrain/models/`
 - 完成标准：`textdrain --help` 可运行，项目结构和入口稳定。
 
-### 2. 领域模型与接口定义
+### 2. 领域模型与接口定义（已完成）
 
 - 定义核心类型：
   - `MediaAsset`
