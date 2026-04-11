@@ -21,6 +21,36 @@ The end-to-end transcription workflow described in the design documents is not i
 ## Requirements
 
 - Go `1.24+`
+- uv
+
+## Python Tool Environment
+
+TextDrain uses external command-line tools for media downloads. The project includes a uv-managed Python environment for tools that are distributed as Python packages, including `yt-dlp`.
+
+From the project root, create or synchronize the Python environment:
+
+```bash
+uv sync
+```
+
+Run Python tools through uv:
+
+```bash
+uv run yt-dlp --version
+```
+
+If you want commands such as `textdrain doctor` to discover `yt-dlp` from the virtual environment, either run TextDrain through `uv run`:
+
+```bash
+uv run go run ./cmd/textdrain doctor
+```
+
+Or activate the virtual environment before running TextDrain:
+
+```bash
+source .venv/bin/activate
+go run ./cmd/textdrain doctor
+```
 
 ## Build And Run
 
