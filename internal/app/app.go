@@ -46,7 +46,7 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	rootCmd.SetErrPrefix("Error: ")
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		a.logger.Error("command execution failed", "error", err)
+		_, _ = fmt.Fprintf(a.ui.Stderr, "Error: %v\n", err)
 		return fmt.Errorf("execute command: %w", err)
 	}
 

@@ -38,8 +38,14 @@ func NewRootCommand(_ context.Context, opts RootOptions) *cobra.Command {
 		cmd.SetOut(opts.UI.Stdout)
 		cmd.SetErr(opts.UI.Stderr)
 	}
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return NewParameterError("%s", err)
+	})
 
 	cmd.AddCommand(newPathsCommand(opts.Paths, cfg))
+	cmd.AddCommand(newTranscribeCommand(cfg))
+	cmd.AddCommand(newDoctorCommand())
+	cmd.AddCommand(newModelsCommand(cfg))
 
 	return cmd
 }

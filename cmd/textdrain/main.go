@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"textdrain/internal/app"
+	"textdrain/internal/cli"
 )
 
 func main() {
@@ -12,6 +13,6 @@ func main() {
 	application := app.New()
 
 	if err := application.Run(ctx, os.Args[1:]); err != nil {
-		os.Exit(1)
+		os.Exit(cli.ExitCode(err))
 	}
 }

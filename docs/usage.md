@@ -11,6 +11,9 @@ At this stage, the project mainly provides:
 - CLI entry and help output
 - Version display
 - Config file loading
+- `transcribe` command argument and flag parsing
+- `doctor` command entry point
+- `models --list` command for local model directory inspection
 - Hidden path inspection command for local directories
 
 The end-to-end transcription workflow described in the design documents is not implemented yet. This guide focuses on what you can use today.
@@ -59,6 +62,37 @@ Expected output includes:
 - Available commands
 - Global flags such as `--help` and `--version`
 
+### Prepare A Transcription Request
+
+```bash
+textdrain transcribe <url-or-path> --lang auto --model small --output ./out --keep-intermediate
+```
+
+Supported flags:
+
+- `--lang auto|zh|en`
+- `--model <name>`
+- `--output <dir>`
+- `--keep-intermediate`
+
+Current output is a validated request summary. The actual media pipeline is implemented in later MVP tasks.
+
+### Check The Environment
+
+```bash
+textdrain doctor
+```
+
+The command is available now. Dependency and model checks are implemented in the next MVP task.
+
+### List Local Models
+
+```bash
+textdrain models --list
+```
+
+The command lists files from the configured `model_dir`. If the directory does not exist, it reports zero models.
+
 ## Configuration
 
 TextDrain reads configuration from:
@@ -95,7 +129,7 @@ Config precedence is:
 2. `config.toml`
 3. Built-in defaults
 
-The current command surface does not expose user-facing CLI config flags yet. The override layer is implemented internally for the upcoming `transcribe` command.
+The `transcribe` command currently exposes CLI overrides for language, model, output directory, and intermediate file retention.
 
 ### Show Version
 
