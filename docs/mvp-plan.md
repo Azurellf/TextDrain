@@ -65,7 +65,7 @@
 - 处理配置缺失时的默认值注入。
 - 完成标准：应用在无配置文件时也能运行，并能读取用户配置覆盖默认值。
 
-### 4. CLI 命令面
+### 4. CLI 命令面（已完成）
 
 - 实现 `textdrain transcribe <url-or-path>`。
 - 实现 `textdrain doctor`。
