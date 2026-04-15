@@ -71,7 +71,7 @@ func newTranscribeCommand(cfg config.Config, transcriber Transcriber) *cobra.Com
 				KeepIntermediate: opts.keepIntermediate,
 			})
 			if err != nil {
-				return NewRuntimeError("transcribe failed: %w", err)
+				return NewPipelineError(err)
 			}
 
 			return printTranscribeResult(cmd, result)
@@ -94,7 +94,7 @@ type statusWriter struct {
 }
 
 func (w statusWriter) Update(_ context.Context, status domain.JobStatus) error {
-	_, err := fmt.Fprintf(w.out, "status=%s\n", status)
+	_, err := fmt.Fprintf(w.out, "stage=%s\n", status)
 	return err
 }
 
@@ -114,8 +114,23 @@ func printTranscribeResult(cmd *cobra.Command, result transcription.Result) erro
 	if _, err := fmt.Fprintf(out, "job_id=%s\nwork_dir=%s\noutputs=%d\n", result.JobID, result.WorkDir, len(result.OutputPaths)); err != nil {
 		return err
 	}
+	if result.Asset.MediaPath != "" {
+		if _, err := fmt.Fprintf(out, "media_path=%s\n", result.Asset.MediaPath); err != nil {
+			return err
+		}
+	}
+	if result.Audio.Path != "" {
+		if _, err := fmt.Fprintf(out, "audio_path=%s\n", result.Audio.Path); err != nil {
+			return err
+		}
+	}
 	for _, path := range result.OutputPaths {
 		if _, err := fmt.Fprintf(out, "output=%s\n", path); err != nil {
+			return err
+		}
+	}
+	if len(result.OutputPaths) > 0 {
+		if _, err := fmt.Fprintf(out, "final_output=%s\n", result.OutputPaths[len(result.OutputPaths)-1]); err != nil {
 			return err
 		}
 	}

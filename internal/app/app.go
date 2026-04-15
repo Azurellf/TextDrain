@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"textdrain/internal/cli"
@@ -32,7 +31,9 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	cfg, err := config.Load(a.paths, config.Overrides{})
 	if err != nil {
 		a.logger.Error("config loading failed", "error", err)
-		return fmt.Errorf("load config: %w", err)
+		configErr := cli.NewConfigError("load config: %w", err)
+		_ = cli.FprintError(a.ui.Stderr, configErr)
+		return configErr
 	}
 	a.config = cfg
 
@@ -46,8 +47,8 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	rootCmd.SetErrPrefix("Error: ")
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		_, _ = fmt.Fprintf(a.ui.Stderr, "Error: %v\n", err)
-		return fmt.Errorf("execute command: %w", err)
+		_ = cli.FprintError(a.ui.Stderr, err)
+		return err
 	}
 
 	return nil

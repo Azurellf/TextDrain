@@ -30,10 +30,17 @@ func TestRootHelpIncludesCommandSurface(t *testing.T) {
 
 func TestTranscribeParsesFlags(t *testing.T) {
 	cfg := testConfig(t)
+	tempDir := t.TempDir()
 	transcriber := &fakeTranscriber{result: transcription.Result{
 		JobID:       "job-1",
-		WorkDir:     filepath.Join(t.TempDir(), "job-1"),
-		OutputPaths: []string{filepath.Join(t.TempDir(), "out.txt")},
+		WorkDir:     filepath.Join(tempDir, "job-1"),
+		OutputPaths: []string{filepath.Join(tempDir, "out.txt")},
+		Asset: domain.MediaAsset{
+			MediaPath: filepath.Join(tempDir, "media.mp4"),
+		},
+		Audio: domain.PreparedAudio{
+			Path: filepath.Join(tempDir, "audio.wav"),
+		},
 	}}
 	output, err := executeTestCommand(t, []string{
 		"transcribe",
@@ -59,7 +66,190 @@ func TestTranscribeParsesFlags(t *testing.T) {
 	if transcriber.request.OutputDir == "" {
 		t.Fatal("request OutputDir is empty, want --output value")
 	}
-	if !strings.Contains(output, "job_id=job-1") || !strings.Contains(output, "outputs=1") {
+	for _, want := range []string{
+		"job_id=job-1",
+		"outputs=1",
+		"media_path=",
+		"audio_path=",
+		"final_output=",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("transcribe output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestTranscribeFormatsStageError(t *testing.T) {
+	cfg := testConfig(t)
+	transcriber := &fakeTranscriber{
+		err: &transcription.StageError{
+			Stage: domain.JobStatusTranscribing,
+			Err:   errors.New("whisper-cli transcription failed: model missing"),
+		},
+	}
+
+	_, err := executeTestCommand(t, []string{"transcribe", "media.mp4"}, cfg, transcriber)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+	if ExitCode(err) != ExitRuntime {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitRuntime)
+	}
+
+	formatted := FormatError(err)
+	for _, want := range []string{
+		"stage: TRANSCRIBING",
+		"type: asr",
+		"reason: whisper-cli transcription failed: model missing",
+		"advice: Check that whisper-cli is installed and the selected model exists.",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestTranscribeFormatsDownloadDependencyError(t *testing.T) {
+	cfg := testConfig(t)
+	transcriber := &fakeTranscriber{
+		err: &transcription.StageError{
+			Stage: domain.JobStatusDownloading,
+			Err:   errors.New("exec: \"yt-dlp\": executable file not found in $PATH"),
+		},
+	}
+
+	_, err := executeTestCommand(t, []string{"transcribe", "https://example.com/video"}, cfg, transcriber)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+	if ExitCode(err) != ExitDependency {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitDependency)
+	}
+
+	formatted := FormatError(err)
+	for _, want := range []string{
+		"stage: DOWNLOADING",
+		"type: dependency",
+		"advice: Install the required external tool and ensure it is available on PATH.",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParameterErrorUsesUserFacingFormat(t *testing.T) {
+	_, err := executeTestCommand(t, []string{"transcribe", "media.mp4", "--lang", "fr"}, testConfig(t), &fakeTranscriber{})
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+
+	formatted := FormatError(err)
+	for _, want := range []string{
+		"stage: INPUT",
+		"type: parameter",
+		"reason: --lang must be one of auto, zh, or en",
+		"advice: Run `textdrain <command> --help` and check the arguments.",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestStatusWriterPrintsStage(t *testing.T) {
+	var output bytes.Buffer
+	writer := statusWriter{out: &output}
+	if err := writer.Update(context.Background(), domain.JobStatusDownloading); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if got := output.String(); got != "stage=DOWNLOADING\n" {
+		t.Fatalf("status output = %q, want stage line", got)
+	}
+}
+
+func TestFormatErrorDefaultsUnclassifiedError(t *testing.T) {
+	formatted := FormatError(errors.New("boom"))
+	for _, want := range []string{
+		"stage: RUNTIME",
+		"type: runtime",
+		"reason: boom",
+		"advice:",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestConfigErrorUsesUserFacingFormat(t *testing.T) {
+	err := NewConfigError("parse config: %s", "bad value")
+	formatted := FormatError(err)
+	for _, want := range []string{
+		"stage: CONFIG",
+		"type: config",
+		"reason: parse config: bad value",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
+		}
+	}
+	if ExitCode(err) != ExitConfig {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitConfig)
+	}
+}
+
+func TestPipelineErrorClassifiesStages(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "download",
+			err:  &transcription.StageError{Stage: domain.JobStatusDownloading, Err: errors.New("download failed")},
+			want: "type: download",
+		},
+		{
+			name: "media",
+			err:  &transcription.StageError{Stage: domain.JobStatusExtractingAudio, Err: errors.New("ffmpeg failed")},
+			want: "type: media",
+		},
+		{
+			name: "export",
+			err:  &transcription.StageError{Stage: domain.JobStatusExporting, Err: errors.New("write failed")},
+			want: "type: export",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			formatted := FormatError(NewPipelineError(tc.err))
+			if !strings.Contains(formatted, tc.want) {
+				t.Fatalf("formatted error does not contain %q:\n%s", tc.want, formatted)
+			}
+		})
+	}
+}
+
+func TestTranscribeOutputContainsResultSummary(t *testing.T) {
+	output, err := executeTestCommand(t, []string{"transcribe", "media.mp4"}, testConfig(t), &fakeTranscriber{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, want := range []string{"job_id=job", "work_dir=work", "outputs=1", "output=output.txt", "final_output=output.txt"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("transcribe output does not contain %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestTranscribeParsesFlagsOutputSummary(t *testing.T) {
+	output, err := executeTestCommand(t, []string{"transcribe", "media.mp4"}, testConfig(t), &fakeTranscriber{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(output, "job_id=job") || !strings.Contains(output, "outputs=1") {
 		t.Fatalf("transcribe output missing result summary:\n%s", output)
 	}
 }
