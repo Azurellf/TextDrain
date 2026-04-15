@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,9 +10,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"textdrain/internal/app/transcription"
 	"textdrain/internal/config"
+	"textdrain/internal/domain"
+	"textdrain/internal/infra/asr"
+	"textdrain/internal/infra/downloader"
 	"textdrain/internal/infra/environment"
+	"textdrain/internal/infra/exporter"
 	"textdrain/internal/infra/ingestion"
+	"textdrain/internal/infra/media"
 )
 
 type transcribeOptions struct {
@@ -22,11 +29,11 @@ type transcribeOptions struct {
 	keepIntermediate bool
 }
 
-func newTranscribeCommand(cfg config.Config) *cobra.Command {
+func newTranscribeCommand(cfg config.Config, transcriber Transcriber) *cobra.Command {
 	opts := transcribeOptions{
 		language:         cfg.Language,
 		model:            cfg.Model,
-		outputDir:        cfg.JobsDir,
+		outputDir:        "",
 		keepIntermediate: cfg.KeepIntermediateFiles,
 	}
 
@@ -51,31 +58,23 @@ func newTranscribeCommand(cfg config.Config) *cobra.Command {
 			if opts.model == "" {
 				return NewParameterError("--model cannot be empty")
 			}
-			if opts.outputDir == "" {
-				return NewParameterError("--output cannot be empty")
+			if transcriber == nil {
+				transcriber = newDefaultTranscriber(cfg, opts.language, cmd.OutOrStdout())
 			}
 
-			resolver := ingestion.NewResolver(opts.outputDir, opts.language)
-			asset, err := resolver.Resolve(cmd.Context(), opts.input)
+			result, err := transcriber.Run(cmd.Context(), transcription.Request{
+				Input:            opts.input,
+				Language:         opts.language,
+				Model:            opts.model,
+				OutputDir:        opts.outputDir,
+				Formats:          cfg.OutputFormats,
+				KeepIntermediate: opts.keepIntermediate,
+			})
 			if err != nil {
-				return NewParameterError("resolve input: %s", err)
+				return NewRuntimeError("transcribe failed: %w", err)
 			}
 
-			_, err = fmt.Fprintf(
-				cmd.OutOrStdout(),
-				"input=%s\nsource_type=%s\ntitle=%s\nsite=%s\nwork_dir=%s\nmedia_path=%s\nlanguage=%s\nmodel=%s\noutput=%s\nkeep_intermediate=%t\n",
-				opts.input,
-				asset.SourceType,
-				asset.Title,
-				asset.Site,
-				asset.WorkDir,
-				asset.MediaPath,
-				opts.language,
-				opts.model,
-				opts.outputDir,
-				opts.keepIntermediate,
-			)
-			return err
+			return printTranscribeResult(cmd, result)
 		},
 	}
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
@@ -88,6 +87,39 @@ func newTranscribeCommand(cfg config.Config) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.keepIntermediate, "keep-intermediate", opts.keepIntermediate, "Keep intermediate media and audio files")
 
 	return cmd
+}
+
+type statusWriter struct {
+	out io.Writer
+}
+
+func (w statusWriter) Update(_ context.Context, status domain.JobStatus) error {
+	_, err := fmt.Fprintf(w.out, "status=%s\n", status)
+	return err
+}
+
+func newDefaultTranscriber(cfg config.Config, language string, out io.Writer) Transcriber {
+	return transcription.NewUseCase(transcription.Dependencies{
+		Resolver:       ingestion.NewResolver(cfg.JobsDir, language),
+		Downloader:     downloader.NewYTDLP(),
+		AudioProcessor: media.NewFFmpeg(),
+		ASREngine:      asr.NewWhisperCLI(cfg.ModelDir),
+		Exporter:       exporter.New(),
+		Reporter:       statusWriter{out: out},
+	})
+}
+
+func printTranscribeResult(cmd *cobra.Command, result transcription.Result) error {
+	out := cmd.OutOrStdout()
+	if _, err := fmt.Fprintf(out, "job_id=%s\nwork_dir=%s\noutputs=%d\n", result.JobID, result.WorkDir, len(result.OutputPaths)); err != nil {
+		return err
+	}
+	for _, path := range result.OutputPaths {
+		if _, err := fmt.Fprintf(out, "output=%s\n", path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newDoctorCommand(paths config.Paths, cfg config.Config) *cobra.Command {

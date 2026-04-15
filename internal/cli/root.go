@@ -6,13 +6,19 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"textdrain/internal/app/transcription"
 	"textdrain/internal/config"
 )
 
 type RootOptions struct {
-	Paths  config.Paths
-	Config config.Config
-	UI     *UI
+	Paths       config.Paths
+	Config      config.Config
+	UI          *UI
+	Transcriber Transcriber
+}
+
+type Transcriber interface {
+	Run(ctx context.Context, req transcription.Request) (transcription.Result, error)
 }
 
 func NewRootCommand(_ context.Context, opts RootOptions) *cobra.Command {
@@ -43,7 +49,7 @@ func NewRootCommand(_ context.Context, opts RootOptions) *cobra.Command {
 	})
 
 	cmd.AddCommand(newPathsCommand(opts.Paths, cfg))
-	cmd.AddCommand(newTranscribeCommand(cfg))
+	cmd.AddCommand(newTranscribeCommand(cfg, opts.Transcriber))
 	cmd.AddCommand(newDoctorCommand(opts.Paths, cfg))
 	cmd.AddCommand(newModelsCommand(cfg))
 

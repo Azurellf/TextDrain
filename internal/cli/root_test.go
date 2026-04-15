@@ -6,14 +6,17 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"textdrain/internal/app/transcription"
 	"textdrain/internal/config"
+	"textdrain/internal/domain"
 )
 
 func TestRootHelpIncludesCommandSurface(t *testing.T) {
-	output, err := executeTestCommand(t, []string{"--help"}, testConfig(t))
+	output, err := executeTestCommand(t, []string{"--help"}, testConfig(t), nil)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -27,6 +30,11 @@ func TestRootHelpIncludesCommandSurface(t *testing.T) {
 
 func TestTranscribeParsesFlags(t *testing.T) {
 	cfg := testConfig(t)
+	transcriber := &fakeTranscriber{result: transcription.Result{
+		JobID:       "job-1",
+		WorkDir:     filepath.Join(t.TempDir(), "job-1"),
+		OutputPaths: []string{filepath.Join(t.TempDir(), "out.txt")},
+	}}
 	output, err := executeTestCommand(t, []string{
 		"transcribe",
 		"https://example.com/video",
@@ -37,20 +45,22 @@ func TestTranscribeParsesFlags(t *testing.T) {
 		"--output",
 		filepath.Join(t.TempDir(), "out"),
 		"--keep-intermediate",
-	}, cfg)
+	}, cfg, transcriber)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	for _, want := range []string{
-		"input=https://example.com/video",
-		"language=zh",
-		"model=base",
-		"keep_intermediate=true",
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("transcribe output does not contain %q:\n%s", want, output)
-		}
+	if transcriber.request.Input != "https://example.com/video" {
+		t.Fatalf("request input = %q, want URL", transcriber.request.Input)
+	}
+	if transcriber.request.Language != "zh" || transcriber.request.Model != "base" || !transcriber.request.KeepIntermediate {
+		t.Fatalf("request = %#v, want parsed flags", transcriber.request)
+	}
+	if transcriber.request.OutputDir == "" {
+		t.Fatal("request OutputDir is empty, want --output value")
+	}
+	if !strings.Contains(output, "job_id=job-1") || !strings.Contains(output, "outputs=1") {
+		t.Fatalf("transcribe output missing result summary:\n%s", output)
 	}
 }
 
@@ -60,6 +70,11 @@ func TestTranscribeResolvesLocalMediaAsset(t *testing.T) {
 	if err := os.WriteFile(mediaPath, []byte("media"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
+	transcriber := &fakeTranscriber{result: transcription.Result{
+		JobID:       "local-file-local-clip",
+		WorkDir:     filepath.Join(t.TempDir(), "local-file-local-clip"),
+		OutputPaths: []string{filepath.Join(t.TempDir(), "Local-Clip.txt")},
+	}}
 
 	output, err := executeTestCommand(t, []string{
 		"transcribe",
@@ -68,26 +83,24 @@ func TestTranscribeResolvesLocalMediaAsset(t *testing.T) {
 		"en",
 		"--output",
 		filepath.Join(t.TempDir(), "out"),
-	}, cfg)
+	}, cfg, transcriber)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	for _, want := range []string{
-		"source_type=local_file",
-		"title=Local Clip",
-		"site=local",
-		"media_path=" + mediaPath,
-		"language=en",
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("transcribe output does not contain %q:\n%s", want, output)
-		}
+	if transcriber.request.Input != mediaPath || transcriber.request.Language != "en" {
+		t.Fatalf("request = %#v, want local media request", transcriber.request)
+	}
+	if !reflect.DeepEqual(transcriber.request.Formats, cfg.OutputFormats) {
+		t.Fatalf("request formats = %#v, want config formats", transcriber.request.Formats)
+	}
+	if !strings.Contains(output, "job_id=local-file-local-clip") {
+		t.Fatalf("transcribe output missing job id:\n%s", output)
 	}
 }
 
 func TestTranscribeRejectsUnsupportedLanguage(t *testing.T) {
-	_, err := executeTestCommand(t, []string{"transcribe", "media.mp4", "--lang", "fr"}, testConfig(t))
+	_, err := executeTestCommand(t, []string{"transcribe", "media.mp4", "--lang", "fr"}, testConfig(t), &fakeTranscriber{})
 	if err == nil {
 		t.Fatal("Execute() error = nil, want error")
 	}
@@ -97,7 +110,7 @@ func TestTranscribeRejectsUnsupportedLanguage(t *testing.T) {
 }
 
 func TestDoctorRejectsArguments(t *testing.T) {
-	_, err := executeTestCommand(t, []string{"doctor", "extra"}, testConfig(t))
+	_, err := executeTestCommand(t, []string{"doctor", "extra"}, testConfig(t), nil)
 	if err == nil {
 		t.Fatal("Execute() error = nil, want error")
 	}
@@ -109,7 +122,7 @@ func TestDoctorRejectsArguments(t *testing.T) {
 func TestDoctorReportsMissingDependencies(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
-	output, err := executeTestCommand(t, []string{"doctor"}, testConfig(t))
+	output, err := executeTestCommand(t, []string{"doctor"}, testConfig(t), nil)
 	if err == nil {
 		t.Fatal("Execute() error = nil, want error")
 	}
@@ -144,7 +157,7 @@ func TestDoctorReportsHealthyEnvironment(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	output, err := executeTestCommand(t, []string{"doctor"}, cfg)
+	output, err := executeTestCommand(t, []string{"doctor"}, cfg, nil)
 	if err != nil {
 		t.Fatalf("Execute() error = %v\n%s", err, output)
 	}
@@ -172,7 +185,7 @@ func TestModelsListShowsFilesInModelDir(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	output, err := executeTestCommand(t, []string{"models", "--list"}, cfg)
+	output, err := executeTestCommand(t, []string{"models", "--list"}, cfg, nil)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -190,20 +203,43 @@ func TestExitCodeDefaultsToRuntimeForUnclassifiedErrors(t *testing.T) {
 	}
 }
 
-func executeTestCommand(t *testing.T, args []string, cfg config.Config) (string, error) {
+func executeTestCommand(t *testing.T, args []string, cfg config.Config, transcriber Transcriber) (string, error) {
 	t.Helper()
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd := NewRootCommand(context.Background(), RootOptions{
-		Paths:  testPaths(t),
-		Config: cfg,
-		UI:     NewUI(&stdout, &stderr),
+		Paths:       testPaths(t),
+		Config:      cfg,
+		UI:          NewUI(&stdout, &stderr),
+		Transcriber: transcriber,
 	})
 	cmd.SetArgs(args)
 
 	err := cmd.ExecuteContext(context.Background())
 	return stdout.String() + stderr.String(), err
+}
+
+type fakeTranscriber struct {
+	request transcription.Request
+	result  transcription.Result
+	err     error
+}
+
+func (t *fakeTranscriber) Run(_ context.Context, req transcription.Request) (transcription.Result, error) {
+	t.request = req
+	if t.err != nil {
+		return transcription.Result{}, t.err
+	}
+	if len(t.result.OutputPaths) == 0 {
+		t.result = transcription.Result{
+			JobID:       "job",
+			WorkDir:     "work",
+			OutputPaths: []string{"output.txt"},
+			Transcript:  domain.Transcript{Text: "text"},
+		}
+	}
+	return t.result, nil
 }
 
 func testConfig(t *testing.T) config.Config {

@@ -11,12 +11,10 @@ At this stage, the project mainly provides:
 - CLI entry and help output
 - Version display
 - Config file loading
-- `transcribe` command argument and flag parsing
+- `transcribe` end-to-end transcription workflow
 - `doctor` dependency and model environment checks
 - `models --list` command for local model directory inspection
 - Hidden path inspection command for local directories
-
-The end-to-end transcription workflow described in the design documents is not implemented yet. This guide focuses on what you can use today.
 
 ## Requirements
 
@@ -92,7 +90,7 @@ Expected output includes:
 - Available commands
 - Global flags such as `--help` and `--version`
 
-### Prepare A Transcription Request
+### Transcribe Media
 
 ```bash
 textdrain transcribe <url-or-path> --lang auto --model small --output ./out --keep-intermediate
@@ -105,7 +103,9 @@ Supported flags:
 - `--output <dir>`
 - `--keep-intermediate`
 
-Current output is a validated request summary. The actual media pipeline is implemented in later MVP tasks.
+The command resolves the input, downloads URL media when needed, prepares normalized audio with `ffmpeg`, transcribes with `whisper-cli`, exports the configured transcript formats, and removes intermediate media unless `--keep-intermediate` is set.
+
+If `--output` is omitted, exports are written under `outputs/<job-id>/` from the current working directory.
 
 ### Check The Environment
 
