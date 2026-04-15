@@ -50,6 +50,7 @@ func TestFFmpegPrepareNormalizesAudioWithDefaults(t *testing.T) {
 	assertContainsArgSequence(t, args, "-ac", "1")
 	assertContainsArgSequence(t, args, "-ar", "16000")
 	assertContainsArgSequence(t, args, "-acodec", "pcm_s16le")
+	assertContainsArgSequence(t, args, "-f", "wav")
 	assertNotContainsArg(t, args, "-af")
 }
 

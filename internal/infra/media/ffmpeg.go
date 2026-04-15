@@ -108,6 +108,7 @@ func (p *FFmpeg) run(ctx context.Context, mediaPath string, outputPath string, o
 		"-ac", fmt.Sprintf("%d", opts.Channels),
 		"-ar", fmt.Sprintf("%d", opts.SampleRateHz),
 		"-acodec", opts.Codec,
+		"-f", "wav",
 	}
 	if filter := audioFilter(opts); filter != "" {
 		args = append(args, "-af", filter)
@@ -187,7 +188,7 @@ func commandError(err error, stderr []byte) error {
 	if message == "" {
 		return fmt.Errorf("ffmpeg audio preparation failed: %w", err)
 	}
-	return fmt.Errorf("ffmpeg audio preparation failed: %s: %w", firstLine(message), err)
+	return fmt.Errorf("ffmpeg audio preparation failed: %s: %w", relevantLine(message), err)
 }
 
 func nextAvailablePath(path string) (string, error) {
@@ -245,4 +246,15 @@ func sanitizeFilename(input string) string {
 func firstLine(input string) string {
 	line, _, _ := strings.Cut(input, "\n")
 	return strings.TrimSpace(line)
+}
+
+func relevantLine(input string) string {
+	fallback := firstLine(input)
+	for _, line := range strings.Split(input, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "Error") || strings.Contains(line, "Unable") || strings.Contains(line, "Invalid") {
+			return line
+		}
+	}
+	return fallback
 }
