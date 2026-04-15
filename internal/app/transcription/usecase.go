@@ -2,10 +2,12 @@ package transcription
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"textdrain/internal/domain"
 )
@@ -96,7 +98,7 @@ func (uc *UseCase) Run(ctx context.Context, req Request) (Result, error) {
 	}
 	result.Asset = asset
 	result.WorkDir = asset.WorkDir
-	result.JobID = jobIDFromWorkDir(asset.WorkDir)
+	result.JobID = jobIDFromAsset(asset)
 
 	if err := os.MkdirAll(asset.WorkDir, 0o755); err != nil {
 		return result, uc.fail(ctx, domain.JobStatusPending, fmt.Errorf("create job workdir %s: %w", asset.WorkDir, err))
@@ -200,9 +202,10 @@ func (uc *UseCase) transcribe(ctx context.Context, audioPath string, workdir str
 		return domain.Transcript{}, err
 	}
 	transcript, err := uc.asrEngine.Transcribe(ctx, audioPath, domain.TranscribeOptions{
-		ModelName: req.Model,
-		Language:  req.Language,
-		WorkDir:   workdir,
+		ModelName:        req.Model,
+		Language:         req.Language,
+		WorkDir:          workdir,
+		KeepIntermediate: req.KeepIntermediate,
 	})
 	if err != nil {
 		return domain.Transcript{}, uc.fail(ctx, domain.JobStatusTranscribing, err)
@@ -276,6 +279,11 @@ func cleanupIntermediate(asset domain.MediaAsset, audio domain.PreparedAudio) er
 			errs = append(errs, err)
 		}
 	}
+	if asset.WorkDir != "" {
+		if err := removeEmptyDirIfExists(asset.WorkDir); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("cleanup intermediate files: %w", errs[0])
 	}
@@ -289,8 +297,22 @@ func removeFileIfExists(path string) error {
 	return nil
 }
 
-func jobIDFromWorkDir(workdir string) string {
-	jobID := strings.TrimSpace(filepath.Base(workdir))
+func removeEmptyDirIfExists(path string) error {
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) || errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
+			return nil
+		}
+		return fmt.Errorf("remove empty job workdir %s: %w", path, err)
+	}
+	return nil
+}
+
+func jobIDFromAsset(asset domain.MediaAsset) string {
+	jobID := strings.TrimSpace(asset.JobID)
+	if jobID != "" {
+		return jobID
+	}
+	jobID = strings.TrimSpace(filepath.Base(asset.WorkDir))
 	if jobID == "." || jobID == string(filepath.Separator) || jobID == "" {
 		return "job"
 	}

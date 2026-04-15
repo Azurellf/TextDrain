@@ -22,6 +22,7 @@ const (
 
 // MediaAsset is the normalized representation of either a local file or a URL source.
 type MediaAsset struct {
+	JobID        string
 	SourceType   SourceType
 	RawInput     string
 	Title        string
@@ -91,9 +92,10 @@ type AudioOptions struct {
 
 // TranscribeOptions configures ASR execution.
 type TranscribeOptions struct {
-	ModelName string
-	ModelPath string
-	Language  string
-	WorkDir   string
-	Threads   int
+	ModelName        string
+	ModelPath        string
+	Language         string
+	WorkDir          string
+	KeepIntermediate bool
+	Threads          int
 }

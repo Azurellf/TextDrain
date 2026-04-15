@@ -57,6 +57,9 @@ func TestWhisperCLITranscribeBuildsTranscriptWithDefaults(t *testing.T) {
 	if transcript.Metadata["execution"] != "cli" {
 		t.Fatalf("Metadata[execution] = %q, want cli", transcript.Metadata["execution"])
 	}
+	if _, err := os.Stat(transcript.Metadata["asr_work_dir"]); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ASR workdir should be cleaned by default, stat err = %v", err)
+	}
 
 	args := readArgs(t, workdir)
 	assertContainsArgSequence(t, args, "-m", modelPath)
@@ -97,6 +100,34 @@ func TestWhisperCLITranscribeAppliesLanguageModelPathAndThreads(t *testing.T) {
 	assertContainsArgSequence(t, args, "-t", "6")
 	assertContainsArgSequence(t, args, "-m", modelPath)
 	assertContainsArgSequence(t, args, "-l", "en")
+}
+
+func TestWhisperCLITranscribeKeepsIntermediateFiles(t *testing.T) {
+	binary := writeFakeWhisperCLI(t, fakeWhisperConfig{})
+	modelPath := writeModelFile(t, "model.bin")
+	audioPath := writeAudioFile(t, "clip.wav")
+	workdir := t.TempDir()
+
+	transcript, err := NewWhisperCLIWithBinary(binary, "").Transcribe(context.Background(), audioPath, domain.TranscribeOptions{
+		ModelPath:        modelPath,
+		WorkDir:          workdir,
+		KeepIntermediate: true,
+	})
+	if err != nil {
+		t.Fatalf("Transcribe() error = %v", err)
+	}
+
+	asrWorkDir := transcript.Metadata["asr_work_dir"]
+	if asrWorkDir == "" {
+		t.Fatal("Metadata[asr_work_dir] is empty, want ASR workdir path")
+	}
+	if _, err := os.Stat(asrWorkDir); err != nil {
+		t.Fatalf("ASR workdir should be kept: %v", err)
+	}
+	transcriptPath := transcript.Metadata["asr_transcript_json_path"]
+	if _, err := os.Stat(transcriptPath); err != nil {
+		t.Fatalf("ASR transcript JSON should be kept: %v", err)
+	}
 }
 
 func TestWhisperCLITranscribeRejectsInvalidInput(t *testing.T) {

@@ -3,6 +3,7 @@ package ingestion
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"textdrain/internal/domain"
 )
@@ -84,14 +86,15 @@ func (r *Resolver) resolveLocal(input string, info os.FileInfo) (domain.MediaAss
 	}
 
 	title := titleFromPath(absPath)
-	workDir := r.workDir(domain.SourceTypeLocalFile, title, absPath)
+	jobID := newJobID(domain.SourceTypeLocalFile, title, absPath)
 
 	return domain.MediaAsset{
+		JobID:        jobID,
 		SourceType:   domain.SourceTypeLocalFile,
 		RawInput:     input,
 		Title:        title,
 		Site:         localSiteName,
-		WorkDir:      workDir,
+		WorkDir:      r.workDir(jobID),
 		MediaPath:    absPath,
 		LanguageHint: r.languageHint,
 		Metadata: map[string]string{
@@ -114,14 +117,15 @@ func (r *Resolver) resolveURL(input string) (domain.MediaAsset, error) {
 
 	title := titleFromURL(parsed)
 	site := parsed.Hostname()
-	workDir := r.workDir(domain.SourceTypeURL, title, input)
+	jobID := newJobID(domain.SourceTypeURL, title, input)
 
 	return domain.MediaAsset{
+		JobID:        jobID,
 		SourceType:   domain.SourceTypeURL,
 		RawInput:     input,
 		Title:        title,
 		Site:         site,
-		WorkDir:      workDir,
+		WorkDir:      r.workDir(jobID),
 		LanguageHint: r.languageHint,
 		Metadata: map[string]string{
 			"url": input,
@@ -129,17 +133,31 @@ func (r *Resolver) resolveURL(input string) (domain.MediaAsset, error) {
 	}, nil
 }
 
-func (r *Resolver) workDir(sourceType domain.SourceType, title string, identity string) string {
+func (r *Resolver) workDir(jobID string) string {
 	root := r.jobsDir
 	if root == "" {
 		root = "."
 	}
 
-	sum := sha256.Sum256([]byte(identity))
-	shortHash := hex.EncodeToString(sum[:])[:12]
-	name := fmt.Sprintf("%s-%s-%s", sourceType, sanitizePathPart(title), shortHash)
+	return filepath.Join(root, jobID)
+}
 
-	return filepath.Join(root, name)
+func newJobID(sourceType domain.SourceType, title string, identity string) string {
+	sum := sha256.Sum256([]byte(identity))
+	identityHash := hex.EncodeToString(sum[:])[:8]
+	now := time.Now().UTC()
+	timestamp := fmt.Sprintf("%s%09dZ", now.Format("20060102T150405"), now.Nanosecond())
+	randomSuffix := randomHex(4)
+
+	return fmt.Sprintf("%s-%s-%s-%s-%s", sanitizePathPart(string(sourceType)), sanitizePathPart(title), timestamp, identityHash, randomSuffix)
+}
+
+func randomHex(size int) string {
+	data := make([]byte, size)
+	if _, err := rand.Read(data); err != nil {
+		return fmt.Sprintf("%d", time.Now().UTC().UnixNano())
+	}
+	return hex.EncodeToString(data)
 }
 
 func titleFromPath(path string) string {

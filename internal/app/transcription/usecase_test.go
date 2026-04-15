@@ -26,6 +26,7 @@ func TestUseCaseRunsEndToEndForLocalFile(t *testing.T) {
 	exporter := &fakeExporter{paths: []string{filepath.Join(tempDir, "out", "clip.txt")}}
 	uc := NewUseCase(Dependencies{
 		Resolver: &fakeResolver{asset: domain.MediaAsset{
+			JobID:      "job-001",
 			SourceType: domain.SourceTypeLocalFile,
 			RawInput:   mediaPath,
 			Title:      "clip",
@@ -64,11 +65,11 @@ func TestUseCaseRunsEndToEndForLocalFile(t *testing.T) {
 	if !reflect.DeepEqual(reporter.statuses, wantStatuses) {
 		t.Fatalf("statuses = %#v, want %#v", reporter.statuses, wantStatuses)
 	}
-	if result.JobID != "local-file-clip" {
-		t.Fatalf("JobID = %q, want local-file-clip", result.JobID)
+	if result.JobID != "job-001" {
+		t.Fatalf("JobID = %q, want job-001", result.JobID)
 	}
-	if exporter.transcript.Metadata["job_id"] != "local-file-clip" {
-		t.Fatalf("export job_id = %q, want local-file-clip", exporter.transcript.Metadata["job_id"])
+	if exporter.transcript.Metadata["job_id"] != "job-001" {
+		t.Fatalf("export job_id = %q, want job-001", exporter.transcript.Metadata["job_id"])
 	}
 	if exporter.transcript.Metadata["title"] != "clip" || exporter.transcript.Metadata["audio_path"] != audioPath {
 		t.Fatalf("export metadata = %#v, want source and audio metadata", exporter.transcript.Metadata)
@@ -86,6 +87,7 @@ func TestUseCaseDownloadsURLAndCleansIntermediateFiles(t *testing.T) {
 
 	uc := NewUseCase(Dependencies{
 		Resolver: &fakeResolver{asset: domain.MediaAsset{
+			JobID:      "job-url-001",
 			SourceType: domain.SourceTypeURL,
 			RawInput:   "https://example.com/video",
 			Title:      "video",
@@ -114,6 +116,9 @@ func TestUseCaseDownloadsURLAndCleansIntermediateFiles(t *testing.T) {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("%s exists after cleanup, stat err = %v", path, err)
 		}
+	}
+	if _, err := os.Stat(workDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty workdir exists after cleanup, stat err = %v", err)
 	}
 }
 

@@ -81,7 +81,7 @@ func (e *WhisperCLI) Transcribe(ctx context.Context, audioPath string, opts doma
 		return domain.Transcript{}, err
 	}
 
-	workdir, cleanup, err := prepareWorkDir(normalized.WorkDir)
+	workdir, cleanup, err := prepareWorkDir(normalized.WorkDir, normalized.KeepIntermediate)
 	if err != nil {
 		return domain.Transcript{}, err
 	}
@@ -107,6 +107,8 @@ func (e *WhisperCLI) Transcribe(ctx context.Context, audioPath string, opts doma
 	}
 	transcript.Metadata["execution"] = "cli"
 	transcript.Metadata["binary"] = e.binary
+	transcript.Metadata["asr_work_dir"] = workdir
+	transcript.Metadata["asr_transcript_json_path"] = outputPrefix + ".json"
 	if normalized.Threads > 0 {
 		transcript.Metadata["threads"] = strconv.Itoa(normalized.Threads)
 	}
@@ -231,12 +233,15 @@ func validateModelPath(modelPath string) (string, error) {
 	return absPath, nil
 }
 
-func prepareWorkDir(workdir string) (string, func(), error) {
+func prepareWorkDir(workdir string, keepIntermediate bool) (string, func(), error) {
 	workdir = strings.TrimSpace(workdir)
 	if workdir == "" {
 		tempDir, err := os.MkdirTemp("", "textdrain-asr-*")
 		if err != nil {
 			return "", func() {}, fmt.Errorf("create temporary asr workdir: %w", err)
+		}
+		if keepIntermediate {
+			return tempDir, func() {}, nil
 		}
 		return tempDir, func() { _ = os.RemoveAll(tempDir) }, nil
 	}
@@ -247,6 +252,9 @@ func prepareWorkDir(workdir string) (string, func(), error) {
 	tempDir, err := os.MkdirTemp(workdir, "asr-*")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("create temporary asr workdir in %s: %w", workdir, err)
+	}
+	if keepIntermediate {
+		return tempDir, func() {}, nil
 	}
 	return tempDir, func() { _ = os.RemoveAll(tempDir) }, nil
 }

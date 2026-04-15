@@ -39,7 +39,13 @@ func TestResolverResolvesLocalFile(t *testing.T) {
 	if asset.MediaPath == "" || !filepath.IsAbs(asset.MediaPath) {
 		t.Fatalf("MediaPath = %q, want absolute path", asset.MediaPath)
 	}
-	if !strings.Contains(asset.WorkDir, filepath.Join("jobs", "local_file-meeting-recording-")) {
+	if asset.JobID == "" {
+		t.Fatal("JobID is empty, want generated job id")
+	}
+	if !strings.HasPrefix(asset.JobID, "local-file-meeting-recording-") {
+		t.Fatalf("JobID = %q, want local file prefix", asset.JobID)
+	}
+	if !strings.Contains(asset.WorkDir, filepath.Join("jobs", "local-file-meeting-recording-")) {
 		t.Fatalf("WorkDir = %q, want sanitized local job directory", asset.WorkDir)
 	}
 	if asset.LanguageHint != "zh" {
@@ -69,8 +75,39 @@ func TestResolverResolvesURL(t *testing.T) {
 	if asset.MediaPath != "" {
 		t.Fatalf("MediaPath = %q, want empty path before download", asset.MediaPath)
 	}
+	if asset.JobID == "" {
+		t.Fatal("JobID is empty, want generated job id")
+	}
+	if !strings.HasPrefix(asset.JobID, "url-watch-") {
+		t.Fatalf("JobID = %q, want URL prefix", asset.JobID)
+	}
 	if !strings.Contains(asset.WorkDir, filepath.Join("jobs", "url-watch-")) {
 		t.Fatalf("WorkDir = %q, want sanitized URL job directory", asset.WorkDir)
+	}
+}
+
+func TestResolverGeneratesUniqueJobIDPerResolve(t *testing.T) {
+	root := t.TempDir()
+	mediaPath := filepath.Join(root, "clip.mp4")
+	if err := os.WriteFile(mediaPath, []byte("media"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	resolver := NewResolver(filepath.Join(root, "jobs"), "auto")
+	first, err := resolver.Resolve(context.Background(), mediaPath)
+	if err != nil {
+		t.Fatalf("Resolve(first) error = %v", err)
+	}
+	second, err := resolver.Resolve(context.Background(), mediaPath)
+	if err != nil {
+		t.Fatalf("Resolve(second) error = %v", err)
+	}
+
+	if first.JobID == second.JobID {
+		t.Fatalf("JobID reused for separate jobs: %q", first.JobID)
+	}
+	if first.WorkDir == second.WorkDir {
+		t.Fatalf("WorkDir reused for separate jobs: %q", first.WorkDir)
 	}
 }
 
