@@ -128,7 +128,14 @@ If a dependency or model file is missing, the command prints a repair suggestion
 textdrain models --list
 ```
 
-The command lists files from the configured `model_dir`. If the directory does not exist, it reports zero models.
+The command lists supported local model files from the configured `model_dir`, including `.gguf` and legacy `.bin` files. If the directory does not exist, it reports zero models.
+
+For each discovered model, the output includes:
+
+- File name
+- File path
+- Size in bytes
+- Whether it matches the configured default model
 
 ## Configuration
 

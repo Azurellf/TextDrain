@@ -366,12 +366,15 @@ func TestDoctorReportsHealthyEnvironment(t *testing.T) {
 	}
 }
 
-func TestModelsListShowsFilesInModelDir(t *testing.T) {
+func TestModelsListShowsLocalModelDetails(t *testing.T) {
 	cfg := testConfig(t)
-	if err := os.WriteFile(filepath.Join(cfg.ModelDir, "ggml-base.bin"), []byte("model"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cfg.ModelDir, "ggml-base.bin"), []byte("base-model"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(cfg.ModelDir, "ggml-small.bin"), []byte("model"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cfg.ModelDir, "small.gguf"), []byte("small-model"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.ModelDir, "notes.txt"), []byte("not a model"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -380,7 +383,31 @@ func TestModelsListShowsFilesInModelDir(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	for _, want := range []string{"models=2", "ggml-base.bin", "ggml-small.bin"} {
+	for _, want := range []string{
+		"default_model=small",
+		"models=2",
+		"model name=ggml-base.bin path=" + filepath.Join(cfg.ModelDir, "ggml-base.bin") + " size_bytes=10 default=false",
+		"model name=small.gguf path=" + filepath.Join(cfg.ModelDir, "small.gguf") + " size_bytes=11 default=true",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("models output does not contain %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "notes.txt") {
+		t.Fatalf("models output contains non-model file:\n%s", output)
+	}
+}
+
+func TestModelsListReportsZeroWhenModelDirDoesNotExist(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.ModelDir = filepath.Join(t.TempDir(), "missing")
+
+	output, err := executeTestCommand(t, []string{"models", "--list"}, cfg, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	for _, want := range []string{"model_dir=" + cfg.ModelDir, "default_model=small", "models=0"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("models output does not contain %q:\n%s", want, output)
 		}

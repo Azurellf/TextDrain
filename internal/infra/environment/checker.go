@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"textdrain/internal/config"
+	"textdrain/internal/infra/models"
 )
 
 const versionTimeout = 3 * time.Second
@@ -158,7 +159,7 @@ func checkModel(modelDir string, modelName string) ModelCheck {
 	check := ModelCheck{
 		Name:   modelName,
 		Dir:    filepath.Clean(modelDir),
-		Advice: "Download a whisper.cpp ggml model into the model directory, or set model_dir/model to an existing model.",
+		Advice: "Place a whisper.cpp GGUF or ggml model in the model directory, or set model_dir/model to an existing model.",
 	}
 
 	if modelName == "" {
@@ -201,27 +202,7 @@ func checkModel(modelDir string, modelName string) ModelCheck {
 }
 
 func modelCandidates(modelDir string, modelName string) []string {
-	if filepath.IsAbs(modelName) || strings.ContainsRune(modelName, filepath.Separator) {
-		return []string{filepath.Clean(modelName)}
-	}
-
-	seen := map[string]struct{}{}
-	candidates := make([]string, 0, 4)
-	add := func(name string) {
-		path := filepath.Join(modelDir, name)
-		if _, ok := seen[path]; ok {
-			return
-		}
-		seen[path] = struct{}{}
-		candidates = append(candidates, path)
-	}
-
-	add(modelName)
-	add(modelName + ".bin")
-	add("ggml-" + modelName + ".bin")
-	add("ggml-" + modelName + ".q5_0.bin")
-
-	return candidates
+	return models.CandidatePaths(modelDir, modelName)
 }
 
 func firstLine(output string) string {

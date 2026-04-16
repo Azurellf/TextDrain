@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -19,6 +17,7 @@ import (
 	"textdrain/internal/infra/exporter"
 	"textdrain/internal/infra/ingestion"
 	"textdrain/internal/infra/media"
+	"textdrain/internal/infra/models"
 )
 
 type transcribeOptions struct {
@@ -180,7 +179,7 @@ func newModelsCommand(cfg config.Config) *cobra.Command {
 			if !list {
 				return cmd.Help()
 			}
-			return listModels(cmd, cfg.ModelDir)
+			return listModels(cmd, cfg)
 		},
 	}
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
@@ -200,35 +199,18 @@ func validateLanguage(language string) error {
 	}
 }
 
-func listModels(cmd *cobra.Command, modelDir string) error {
-	if modelDir == "" {
-		return NewParameterError("model directory is not configured")
-	}
-
-	entries, err := os.ReadDir(modelDir)
+func listModels(cmd *cobra.Command, cfg config.Config) error {
+	discovered, err := models.Discover(cfg.ModelDir, cfg.Model)
 	if err != nil {
-		if os.IsNotExist(err) {
-			_, writeErr := fmt.Fprintf(cmd.OutOrStdout(), "model_dir=%s\nmodels=0\n", modelDir)
-			return writeErr
-		}
-		return NewRuntimeError("read model directory %s: %w", modelDir, err)
+		return NewRuntimeError("read model directory %s: %w", cfg.ModelDir, err)
 	}
-
-	models := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		models = append(models, entry.Name())
-	}
-	sort.Strings(models)
 
 	out := cmd.OutOrStdout()
-	if _, err := fmt.Fprintf(out, "model_dir=%s\nmodels=%d\n", filepath.Clean(modelDir), len(models)); err != nil {
+	if _, err := fmt.Fprintf(out, "model_dir=%s\ndefault_model=%s\nmodels=%d\n", filepath.Clean(cfg.ModelDir), cfg.Model, len(discovered)); err != nil {
 		return err
 	}
-	for _, model := range models {
-		if _, err := fmt.Fprintf(out, "%s\n", model); err != nil {
+	for _, model := range discovered {
+		if _, err := fmt.Fprintf(out, "model name=%s path=%s size_bytes=%d default=%t\n", model.Name, model.Path, model.SizeBytes, model.Default); err != nil {
 			return err
 		}
 	}

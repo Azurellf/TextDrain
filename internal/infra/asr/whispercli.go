@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"textdrain/internal/domain"
+	"textdrain/internal/infra/models"
 )
 
 const (
@@ -260,22 +261,7 @@ func prepareWorkDir(workdir string, keepIntermediate bool) (string, func(), erro
 }
 
 func modelCandidateNames(modelName string) []string {
-	seen := map[string]struct{}{}
-	candidates := make([]string, 0, 4)
-	add := func(name string) {
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		candidates = append(candidates, name)
-	}
-
-	add(modelName)
-	add(modelName + ".bin")
-	add("ggml-" + modelName + ".bin")
-	add("ggml-" + modelName + ".q5_0.bin")
-
-	return candidates
+	return models.CandidateNames(modelName)
 }
 
 func commandError(err error, stderr []byte) error {
