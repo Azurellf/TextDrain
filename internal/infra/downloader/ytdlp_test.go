@@ -15,7 +15,7 @@ import (
 
 func TestYTDLPFetchDownloadsBestAudioAndReturnsMetadata(t *testing.T) {
 	binary := writeFakeYTDLP(t, fakeYTDLPConfig{
-		metadataJSON: `{"id":"abc123","title":"Bad / Title: Episode 1","extractor_key":"YouTube","webpage_url":"https://example.com/watch?v=abc123","original_url":"https://example.com/watch?v=abc123","duration":12.5}`,
+		metadataJSON: readCommandFixture(t, "ytdlp_metadata_youtube.json"),
 	})
 	asset := domain.MediaAsset{
 		SourceType: domain.SourceTypeURL,
@@ -61,7 +61,7 @@ func TestYTDLPFetchDownloadsBestAudioAndReturnsMetadata(t *testing.T) {
 
 func TestYTDLPFetchFallsBackToBestMedia(t *testing.T) {
 	binary := writeFakeYTDLP(t, fakeYTDLPConfig{
-		metadataJSON:      `{"title":"Fallback Clip","extractor":"Generic","duration":3}`,
+		metadataJSON:      readCommandFixture(t, "ytdlp_metadata_fallback.json"),
 		failBestAudio:     true,
 		fallbackExtension: "mp4",
 	})
@@ -179,4 +179,14 @@ func boolString(value bool) string {
 
 func shellSingleQuote(input string) string {
 	return strings.ReplaceAll(input, `'`, `'\''`)
+}
+
+func readCommandFixture(t *testing.T, name string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "commands", name))
+	if err != nil {
+		t.Fatalf("ReadFile(command fixture) error = %v", err)
+	}
+	return strings.TrimSpace(string(data))
 }

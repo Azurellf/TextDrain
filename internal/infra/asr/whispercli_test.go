@@ -189,7 +189,8 @@ func TestParseTranscriptJSONFallsBackToParamsLanguage(t *testing.T) {
 }
 
 type fakeWhisperConfig struct {
-	fail bool
+	fail           bool
+	transcriptJSON string
 }
 
 func writeFakeWhisperCLI(t *testing.T, cfg fakeWhisperConfig) string {
@@ -200,6 +201,10 @@ func writeFakeWhisperCLI(t *testing.T, cfg fakeWhisperConfig) string {
 
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "whisper-cli")
+	transcriptJSON := cfg.transcriptJSON
+	if transcriptJSON == "" {
+		transcriptJSON = readCommandFixture(t, "whisper_transcript.json")
+	}
 	script := `#!/bin/sh
 set -eu
 audio=""
@@ -238,14 +243,7 @@ fi
 mkdir -p "$(dirname "$output")"
 printf '%s\n' "$@" > "$(dirname "$(dirname "$output")")/whisper.args"
 cat > "$output.json" <<'JSON'
-{
-  "params": {"model": "ggml-small.bin", "language": "auto"},
-  "result": {"language": "zh"},
-  "transcription": [
-    {"timestamps": {"from": "00:00:00,000", "to": "00:00:01,240"}, "offsets": {"from": 0, "to": 1240}, "text": " hello "},
-    {"timestamps": {"from": "00:00:01,240", "to": "00:00:02,000"}, "offsets": {"from": 1240, "to": 2000}, "text": "world"}
-  ]
-}
+` + transcriptJSON + `
 JSON
 `
 	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
@@ -311,4 +309,14 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func readCommandFixture(t *testing.T, name string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "commands", name))
+	if err != nil {
+		t.Fatalf("ReadFile(command fixture) error = %v", err)
+	}
+	return strings.TrimSpace(string(data))
 }

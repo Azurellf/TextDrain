@@ -119,7 +119,10 @@ func TestFFmpegPrepareRejectsInvalidInput(t *testing.T) {
 }
 
 func TestFFmpegPrepareReportsCommandError(t *testing.T) {
-	binary := writeFakeFFmpeg(t, fakeFFmpegConfig{fail: true})
+	binary := writeFakeFFmpeg(t, fakeFFmpegConfig{
+		fail:       true,
+		stderrText: readCommandFixture(t, "ffmpeg_error.txt"),
+	})
 	mediaPath := writeMediaFile(t, "broken.mp4")
 
 	_, err := NewFFmpegWithBinary(binary).Prepare(context.Background(), mediaPath, t.TempDir(), domain.AudioOptions{})
@@ -132,7 +135,8 @@ func TestFFmpegPrepareReportsCommandError(t *testing.T) {
 }
 
 type fakeFFmpegConfig struct {
-	fail bool
+	fail       bool
+	stderrText string
 }
 
 func writeFakeFFmpeg(t *testing.T, cfg fakeFFmpegConfig) string {
@@ -159,7 +163,7 @@ for arg in "$@"; do
 done
 
 if [ "` + boolString(cfg.fail) + `" = "true" ]; then
-  echo "invalid media" >&2
+  printf '%s\n' '` + shellSingleQuote(stderrText(cfg)) + `' >&2
   exit 2
 fi
 
@@ -235,4 +239,25 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func stderrText(cfg fakeFFmpegConfig) string {
+	if cfg.stderrText != "" {
+		return cfg.stderrText
+	}
+	return "invalid media"
+}
+
+func shellSingleQuote(input string) string {
+	return strings.ReplaceAll(input, `'`, `'\''`)
+}
+
+func readCommandFixture(t *testing.T, name string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "commands", name))
+	if err != nil {
+		t.Fatalf("ReadFile(command fixture) error = %v", err)
+	}
+	return strings.TrimSpace(string(data))
 }

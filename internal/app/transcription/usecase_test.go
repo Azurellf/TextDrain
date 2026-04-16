@@ -79,6 +79,98 @@ func TestUseCaseRunsEndToEndForLocalFile(t *testing.T) {
 	}
 }
 
+func TestUseCaseRunsEndToEndForLocalAudioInput(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaPath := filepath.Join(tempDir, "voice.wav")
+	audioPath := filepath.Join(tempDir, "jobs", "local-audio", "voice.wav")
+	if err := os.WriteFile(mediaPath, []byte("audio"), 0o644); err != nil {
+		t.Fatalf("WriteFile(media) error = %v", err)
+	}
+
+	audioProcessor := &fakeAudioProcessor{audioPath: audioPath}
+	uc := NewUseCase(Dependencies{
+		Resolver: &fakeResolver{asset: domain.MediaAsset{
+			JobID:      "local-audio",
+			SourceType: domain.SourceTypeLocalFile,
+			RawInput:   mediaPath,
+			Title:      "voice",
+			Site:       "local",
+			WorkDir:    filepath.Dir(audioPath),
+			MediaPath:  mediaPath,
+			Metadata:   map[string]string{"filename": "voice.wav"},
+		}},
+		Downloader:     &fakeDownloader{},
+		AudioProcessor: audioProcessor,
+		ASREngine:      &fakeASR{},
+		Exporter:       &fakeExporter{paths: []string{filepath.Join(tempDir, "out", "voice.txt")}},
+	})
+
+	result, err := uc.Run(context.Background(), Request{
+		Input:            mediaPath,
+		Language:         "en",
+		Model:            "base",
+		OutputDir:        filepath.Join(tempDir, "out"),
+		Formats:          []domain.OutputFormat{domain.OutputFormatTXT},
+		KeepIntermediate: true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if result.Asset.SourceType != domain.SourceTypeLocalFile || result.Audio.SourcePath != mediaPath {
+		t.Fatalf("result asset/audio = %#v/%#v, want local audio path preserved", result.Asset, result.Audio)
+	}
+	if audioProcessor.mediaPath != mediaPath {
+		t.Fatalf("audio processor mediaPath = %q, want %q", audioProcessor.mediaPath, mediaPath)
+	}
+}
+
+func TestUseCaseRunsEndToEndForLocalVideoInput(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaPath := filepath.Join(tempDir, "meeting.mp4")
+	audioPath := filepath.Join(tempDir, "jobs", "local-video", "meeting.wav")
+	if err := os.WriteFile(mediaPath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("WriteFile(media) error = %v", err)
+	}
+
+	audioProcessor := &fakeAudioProcessor{audioPath: audioPath}
+	uc := NewUseCase(Dependencies{
+		Resolver: &fakeResolver{asset: domain.MediaAsset{
+			JobID:      "local-video",
+			SourceType: domain.SourceTypeLocalFile,
+			RawInput:   mediaPath,
+			Title:      "meeting",
+			Site:       "local",
+			WorkDir:    filepath.Dir(audioPath),
+			MediaPath:  mediaPath,
+			Metadata:   map[string]string{"filename": "meeting.mp4"},
+		}},
+		Downloader:     &fakeDownloader{},
+		AudioProcessor: audioProcessor,
+		ASREngine:      &fakeASR{},
+		Exporter:       &fakeExporter{paths: []string{filepath.Join(tempDir, "out", "meeting.txt")}},
+	})
+
+	result, err := uc.Run(context.Background(), Request{
+		Input:            mediaPath,
+		Language:         "zh",
+		Model:            "small",
+		OutputDir:        filepath.Join(tempDir, "out"),
+		Formats:          []domain.OutputFormat{domain.OutputFormatSRT},
+		KeepIntermediate: true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if result.Asset.Title != "meeting" || result.Audio.Codec != "pcm_s16le" {
+		t.Fatalf("result = %#v, want local video converted to prepared audio", result)
+	}
+	if audioProcessor.mediaPath != mediaPath {
+		t.Fatalf("audio processor mediaPath = %q, want %q", audioProcessor.mediaPath, mediaPath)
+	}
+}
+
 func TestUseCaseDownloadsURLAndCleansIntermediateFiles(t *testing.T) {
 	tempDir := t.TempDir()
 	workDir := filepath.Join(tempDir, "jobs", "url-video")
@@ -119,6 +211,84 @@ func TestUseCaseDownloadsURLAndCleansIntermediateFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(workDir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("empty workdir exists after cleanup, stat err = %v", err)
+	}
+}
+
+func TestUseCaseReportsMissingDependency(t *testing.T) {
+	wantErr := errors.New("yt-dlp executable not found")
+	reporter := &recordingReporter{}
+	uc := NewUseCase(Dependencies{
+		Resolver: &fakeResolver{asset: domain.MediaAsset{
+			JobID:      "url-video",
+			SourceType: domain.SourceTypeURL,
+			RawInput:   "https://example.com/video",
+			Title:      "video",
+			Site:       "example.com",
+			WorkDir:    t.TempDir(),
+			Metadata:   map[string]string{"url": "https://example.com/video"},
+		}},
+		Downloader:     &fakeDownloader{err: wantErr},
+		AudioProcessor: &fakeAudioProcessor{},
+		ASREngine:      &fakeASR{},
+		Exporter:       &fakeExporter{},
+		Reporter:       reporter,
+	})
+
+	_, err := uc.Run(context.Background(), Request{Input: "https://example.com/video", Language: "auto", Model: "small"})
+	if err == nil {
+		t.Fatal("Run() error = nil, want error")
+	}
+	var stageErr *StageError
+	if !errors.As(err, &stageErr) {
+		t.Fatalf("Run() error = %T, want StageError", err)
+	}
+	if stageErr.Stage != domain.JobStatusDownloading {
+		t.Fatalf("Stage = %s, want %s", stageErr.Stage, domain.JobStatusDownloading)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Run() error = %v, want wrapped dependency error", err)
+	}
+	if got := reporter.statuses[len(reporter.statuses)-1]; got != domain.JobStatusFailed {
+		t.Fatalf("last status = %s, want FAILED", got)
+	}
+}
+
+func TestUseCaseReportsMissingModel(t *testing.T) {
+	wantErr := errors.New("model small is missing")
+	reporter := &recordingReporter{}
+	uc := NewUseCase(Dependencies{
+		Resolver: &fakeResolver{asset: domain.MediaAsset{
+			JobID:      "local-audio",
+			SourceType: domain.SourceTypeLocalFile,
+			RawInput:   "clip.wav",
+			Title:      "clip",
+			Site:       "local",
+			WorkDir:    t.TempDir(),
+			MediaPath:  "clip.wav",
+		}},
+		Downloader:     &fakeDownloader{},
+		AudioProcessor: &fakeAudioProcessor{audioPath: filepath.Join(t.TempDir(), "clip.wav")},
+		ASREngine:      &fakeASR{err: wantErr},
+		Exporter:       &fakeExporter{},
+		Reporter:       reporter,
+	})
+
+	_, err := uc.Run(context.Background(), Request{Input: "clip.wav", Language: "en", Model: "small"})
+	if err == nil {
+		t.Fatal("Run() error = nil, want error")
+	}
+	var stageErr *StageError
+	if !errors.As(err, &stageErr) {
+		t.Fatalf("Run() error = %T, want StageError", err)
+	}
+	if stageErr.Stage != domain.JobStatusTranscribing {
+		t.Fatalf("Stage = %s, want %s", stageErr.Stage, domain.JobStatusTranscribing)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Run() error = %v, want wrapped model error", err)
+	}
+	if got := reporter.statuses[len(reporter.statuses)-1]; got != domain.JobStatusFailed {
+		t.Fatalf("last status = %s, want FAILED", got)
 	}
 }
 
@@ -204,6 +374,7 @@ func (d *fakeDownloader) Fetch(_ context.Context, asset domain.MediaAsset, _ str
 
 type fakeAudioProcessor struct {
 	audioPath string
+	mediaPath string
 	err       error
 }
 
@@ -211,6 +382,7 @@ func (p *fakeAudioProcessor) Prepare(_ context.Context, mediaPath string, _ stri
 	if p.err != nil {
 		return domain.PreparedAudio{}, p.err
 	}
+	p.mediaPath = mediaPath
 	if err := os.MkdirAll(filepath.Dir(p.audioPath), 0o755); err != nil {
 		return domain.PreparedAudio{}, err
 	}
