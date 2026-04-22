@@ -7,6 +7,11 @@ type SourceResolver interface {
 	Resolve(ctx context.Context, input string) (MediaAsset, error)
 }
 
+// URLInspector reads URL metadata before a final job directory is created.
+type URLInspector interface {
+	Inspect(ctx context.Context, asset MediaAsset) (MediaAsset, error)
+}
+
 // Downloader fetches URL-backed media and returns a local media file.
 type Downloader interface {
 	Fetch(ctx context.Context, asset MediaAsset, workdir string) (DownloadResult, error)

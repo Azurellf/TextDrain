@@ -45,6 +45,24 @@ func NewYTDLPWithBinary(binary string) *YTDLP {
 	return &YTDLP{binary: binary}
 }
 
+// Inspect enriches a URL asset with yt-dlp metadata without downloading media.
+func (d *YTDLP) Inspect(ctx context.Context, asset domain.MediaAsset) (domain.MediaAsset, error) {
+	if asset.SourceType != domain.SourceTypeURL {
+		return domain.MediaAsset{}, fmt.Errorf("%w: %s", ErrNonURLAsset, asset.SourceType)
+	}
+	if strings.TrimSpace(asset.RawInput) == "" {
+		return domain.MediaAsset{}, fmt.Errorf("%w: missing URL", ErrNonURLAsset)
+	}
+
+	metadata, err := d.Metadata(ctx, asset.RawInput)
+	if err != nil {
+		return domain.MediaAsset{}, err
+	}
+
+	updated := assetFromMetadata(asset, metadata, "")
+	return updated, nil
+}
+
 // Fetch downloads URL-backed media into workdir and returns structured metadata.
 func (d *YTDLP) Fetch(ctx context.Context, asset domain.MediaAsset, workdir string) (domain.DownloadResult, error) {
 	if asset.SourceType != domain.SourceTypeURL {
@@ -63,7 +81,7 @@ func (d *YTDLP) Fetch(ctx context.Context, asset domain.MediaAsset, workdir stri
 		return domain.DownloadResult{}, fmt.Errorf("create download workdir %s: %w", workdir, err)
 	}
 
-	metadata, err := d.Metadata(ctx, asset.RawInput)
+	metadata, err := d.metadataForDownload(ctx, asset)
 	if err != nil {
 		return domain.DownloadResult{}, err
 	}
@@ -89,12 +107,7 @@ func (d *YTDLP) Fetch(ctx context.Context, asset domain.MediaAsset, workdir stri
 		return domain.DownloadResult{}, err
 	}
 
-	updatedAsset := asset
-	updatedAsset.Title = title
-	updatedAsset.Site = site
-	updatedAsset.Duration = metadata.duration()
-	updatedAsset.MediaPath = mediaPath
-	updatedAsset.Metadata = mergeMetadata(asset.Metadata, metadata.toMap())
+	updatedAsset := assetFromMetadata(asset, metadata, mediaPath)
 
 	return domain.DownloadResult{
 		Asset:       updatedAsset,
@@ -105,6 +118,13 @@ func (d *YTDLP) Fetch(ctx context.Context, asset domain.MediaAsset, workdir stri
 		Duration:    metadata.duration(),
 		Metadata:    updatedAsset.Metadata,
 	}, nil
+}
+
+func (d *YTDLP) metadataForDownload(ctx context.Context, asset domain.MediaAsset) (Metadata, error) {
+	if metadata, ok := metadataFromAsset(asset); ok {
+		return metadata, nil
+	}
+	return d.Metadata(ctx, asset.RawInput)
 }
 
 // Metadata returns structured yt-dlp metadata without downloading media.
@@ -202,6 +222,36 @@ func (m Metadata) toMap() map[string]string {
 		}
 	}
 	return values
+}
+
+func metadataFromAsset(asset domain.MediaAsset) (Metadata, bool) {
+	values := asset.Metadata
+	if len(values) == 0 {
+		return Metadata{}, false
+	}
+	metadata := Metadata{
+		ID:           values["id"],
+		Title:        values["title"],
+		Extractor:    values["extractor"],
+		ExtractorKey: values["extractor_key"],
+		WebpageURL:   values["webpage_url"],
+		OriginalURL:  values["original_url"],
+		Duration:     json.Number(values["duration"]),
+	}
+	if metadata.ID == "" && metadata.Title == "" && metadata.Extractor == "" && metadata.ExtractorKey == "" && metadata.WebpageURL == "" && metadata.OriginalURL == "" && metadata.Duration == "" {
+		return Metadata{}, false
+	}
+	return metadata, true
+}
+
+func assetFromMetadata(asset domain.MediaAsset, metadata Metadata, mediaPath string) domain.MediaAsset {
+	updated := asset
+	updated.Title = firstNonEmpty(metadata.Title, asset.Title, unknownTitle)
+	updated.Site = firstNonEmpty(metadata.ExtractorKey, metadata.Extractor, asset.Site)
+	updated.Duration = metadata.duration()
+	updated.MediaPath = mediaPath
+	updated.Metadata = mergeMetadata(asset.Metadata, metadata.toMap())
+	return updated
 }
 
 func findDownloadedFile(outputTemplate string) (string, error) {

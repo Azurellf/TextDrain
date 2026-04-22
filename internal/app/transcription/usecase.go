@@ -2,12 +2,16 @@ package transcription
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode"
+	"unicode/utf8"
 
 	"textdrain/internal/domain"
 )
@@ -54,6 +58,7 @@ func (e *StageError) Unwrap() error {
 // UseCase orchestrates source resolution, download, audio preparation, ASR, export, and cleanup.
 type UseCase struct {
 	resolver       domain.SourceResolver
+	urlInspector   domain.URLInspector
 	downloader     domain.Downloader
 	audioProcessor domain.AudioProcessor
 	asrEngine      domain.ASREngine
@@ -64,6 +69,7 @@ type UseCase struct {
 // Dependencies are the infrastructure adapters required by the use case.
 type Dependencies struct {
 	Resolver       domain.SourceResolver
+	URLInspector   domain.URLInspector
 	Downloader     domain.Downloader
 	AudioProcessor domain.AudioProcessor
 	ASREngine      domain.ASREngine
@@ -74,6 +80,7 @@ type Dependencies struct {
 func NewUseCase(deps Dependencies) *UseCase {
 	return &UseCase{
 		resolver:       deps.Resolver,
+		urlInspector:   deps.URLInspector,
 		downloader:     deps.Downloader,
 		audioProcessor: deps.AudioProcessor,
 		asrEngine:      deps.ASREngine,
@@ -95,6 +102,12 @@ func (uc *UseCase) Run(ctx context.Context, req Request) (Result, error) {
 	asset, err := uc.resolve(ctx, req.Input)
 	if err != nil {
 		return result, err
+	}
+	if asset.SourceType == domain.SourceTypeURL {
+		asset, err = uc.inspectURL(ctx, asset)
+		if err != nil {
+			return result, err
+		}
 	}
 	result.Asset = asset
 	result.WorkDir = asset.WorkDir
@@ -173,6 +186,17 @@ func (uc *UseCase) resolve(ctx context.Context, input string) (domain.MediaAsset
 		return domain.MediaAsset{}, uc.fail(ctx, domain.JobStatusResolving, err)
 	}
 	return asset, nil
+}
+
+func (uc *UseCase) inspectURL(ctx context.Context, asset domain.MediaAsset) (domain.MediaAsset, error) {
+	if uc.urlInspector == nil {
+		return domain.MediaAsset{}, uc.fail(ctx, domain.JobStatusResolving, fmt.Errorf("transcribe use case url inspector is nil"))
+	}
+	inspected, err := uc.urlInspector.Inspect(ctx, asset)
+	if err != nil {
+		return domain.MediaAsset{}, uc.fail(ctx, domain.JobStatusResolving, err)
+	}
+	return applyStableURLJobPath(inspected), nil
 }
 
 func (uc *UseCase) download(ctx context.Context, asset domain.MediaAsset) (domain.DownloadResult, error) {
@@ -317,4 +341,81 @@ func jobIDFromAsset(asset domain.MediaAsset) string {
 		return "job"
 	}
 	return jobID
+}
+
+func applyStableURLJobPath(asset domain.MediaAsset) domain.MediaAsset {
+	if asset.SourceType != domain.SourceTypeURL {
+		return asset
+	}
+
+	jobsDir := filepath.Dir(asset.WorkDir)
+	if strings.TrimSpace(jobsDir) == "" || jobsDir == "." {
+		jobsDir = "."
+	}
+
+	title := firstNonEmpty(asset.Title, asset.Metadata["title"], "untitled")
+	id := strings.TrimSpace(asset.Metadata["id"])
+	if id != "" {
+		asset.JobID = fmt.Sprintf("%s-%s", sanitizeURLJobPart(title), sanitizeURLJobPart(id))
+	} else {
+		asset.JobID = fmt.Sprintf("%s-url-%s", sanitizeURLJobPart(title), shortHash(asset.RawInput))
+	}
+	asset.WorkDir = filepath.Join(jobsDir, asset.JobID)
+	return asset
+}
+
+func sanitizeURLJobPart(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "untitled"
+	}
+
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range input {
+		switch {
+		case unicode.IsLetter(r), unicode.IsNumber(r):
+			builder.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				builder.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+
+	result := strings.Trim(builder.String(), "-")
+	if result == "" {
+		return "untitled"
+	}
+	if utf8.RuneCountInString(result) > 80 {
+		return strings.Trim(truncateRunes(result, 80), "-")
+	}
+	return result
+}
+
+func truncateRunes(input string, limit int) string {
+	for index := range input {
+		if limit == 0 {
+			return input[:index]
+		}
+		limit--
+	}
+	return input
+}
+
+func shortHash(input string) string {
+	sum := sha256.Sum256([]byte(input))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

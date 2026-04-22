@@ -80,6 +80,76 @@ func TestYTDLPFetchFallsBackToBestMedia(t *testing.T) {
 	}
 }
 
+func TestYTDLPInspectReturnsAssetWithMetadata(t *testing.T) {
+	binary := writeFakeYTDLP(t, fakeYTDLPConfig{
+		metadataJSON: readCommandFixture(t, "ytdlp_metadata_youtube.json"),
+	})
+	asset := domain.MediaAsset{
+		SourceType: domain.SourceTypeURL,
+		RawInput:   "https://example.com/watch?v=abc123",
+		Title:      "watch",
+		Site:       "example.com",
+		WorkDir:    filepath.Join(t.TempDir(), "job"),
+		Metadata:   map[string]string{"url": "https://example.com/watch?v=abc123"},
+	}
+
+	inspected, err := NewYTDLPWithBinary(binary).Inspect(context.Background(), asset)
+	if err != nil {
+		t.Fatalf("Inspect() error = %v", err)
+	}
+
+	if inspected.Title != "Bad / Title: Episode 1" {
+		t.Fatalf("Title = %q, want metadata title", inspected.Title)
+	}
+	if inspected.Site != "YouTube" {
+		t.Fatalf("Site = %q, want YouTube", inspected.Site)
+	}
+	if inspected.Duration != 12500*time.Millisecond {
+		t.Fatalf("Duration = %s, want 12.5s", inspected.Duration)
+	}
+	if inspected.Metadata["id"] != "abc123" {
+		t.Fatalf("metadata id = %q, want abc123", inspected.Metadata["id"])
+	}
+	if inspected.Metadata["title"] != "Bad / Title: Episode 1" {
+		t.Fatalf("metadata title = %q, want metadata title", inspected.Metadata["title"])
+	}
+	if inspected.Metadata["url"] != asset.RawInput {
+		t.Fatalf("metadata url = %q, want original resolver metadata preserved", inspected.Metadata["url"])
+	}
+}
+
+func TestYTDLPFetchUsesInspectedAssetMetadata(t *testing.T) {
+	binary := writeFakeYTDLP(t, fakeYTDLPConfig{
+		metadataJSON:         readCommandFixture(t, "ytdlp_metadata_youtube.json"),
+		failRepeatedMetadata: true,
+	})
+	downloader := NewYTDLPWithBinary(binary)
+	asset := domain.MediaAsset{
+		SourceType: domain.SourceTypeURL,
+		RawInput:   "https://example.com/watch?v=abc123",
+		Title:      "watch",
+		Site:       "example.com",
+		WorkDir:    filepath.Join(t.TempDir(), "job"),
+		Metadata:   map[string]string{"url": "https://example.com/watch?v=abc123"},
+	}
+
+	inspected, err := downloader.Inspect(context.Background(), asset)
+	if err != nil {
+		t.Fatalf("Inspect() error = %v", err)
+	}
+	result, err := downloader.Fetch(context.Background(), inspected, inspected.WorkDir)
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+
+	if result.Title != "Bad / Title: Episode 1" {
+		t.Fatalf("Title = %q, want inspected metadata title", result.Title)
+	}
+	if filepath.Base(result.MediaPath) != "Bad-Title-Episode-1.m4a" {
+		t.Fatalf("MediaPath basename = %q, want inspected title filename", filepath.Base(result.MediaPath))
+	}
+}
+
 func TestYTDLPFetchRejectsLocalAsset(t *testing.T) {
 	_, err := NewYTDLPWithBinary("unused").Fetch(context.Background(), domain.MediaAsset{
 		SourceType: domain.SourceTypeLocalFile,
@@ -106,9 +176,10 @@ func TestYTDLPMetadataReportsParseError(t *testing.T) {
 }
 
 type fakeYTDLPConfig struct {
-	metadataJSON      string
-	failBestAudio     bool
-	fallbackExtension string
+	metadataJSON         string
+	failBestAudio        bool
+	failRepeatedMetadata bool
+	fallbackExtension    string
 }
 
 func writeFakeYTDLP(t *testing.T, cfg fakeYTDLPConfig) string {
@@ -120,10 +191,18 @@ func writeFakeYTDLP(t *testing.T, cfg fakeYTDLPConfig) string {
 	if extension == "" {
 		extension = "m4a"
 	}
+	metadataGuard := filepath.Join(dir, "metadata-called")
 
 	script := `#!/bin/sh
 set -eu
 if [ "$1" = "--dump-single-json" ]; then
+  if [ "` + boolString(cfg.failRepeatedMetadata) + `" = "true" ]; then
+    if [ -f '` + shellSingleQuote(metadataGuard) + `' ]; then
+      echo "metadata already read" >&2
+      exit 9
+    fi
+    touch '` + shellSingleQuote(metadataGuard) + `'
+  fi
   printf '%s\n' '` + shellSingleQuote(cfg.metadataJSON) + `'
   exit 0
 fi

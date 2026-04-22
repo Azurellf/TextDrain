@@ -98,9 +98,11 @@ func (w statusWriter) Update(_ context.Context, status domain.JobStatus) error {
 }
 
 func newDefaultTranscriber(cfg config.Config, language string, out io.Writer) Transcriber {
+	ytdlp := downloader.NewYTDLP()
 	return transcription.NewUseCase(transcription.Dependencies{
 		Resolver:       ingestion.NewResolver(cfg.JobsDir, language),
-		Downloader:     downloader.NewYTDLP(),
+		URLInspector:   ytdlp,
+		Downloader:     ytdlp,
 		AudioProcessor: media.NewFFmpeg(),
 		ASREngine:      asr.NewWhisperCLI(cfg.ModelDir),
 		Exporter:       exporter.New(),

@@ -35,6 +35,7 @@ func TestUseCaseRunsEndToEndForLocalFile(t *testing.T) {
 			MediaPath:  mediaPath,
 			Metadata:   map[string]string{"filename": "clip.mp4"},
 		}},
+		URLInspector:   &fakeURLInspector{},
 		Downloader:     &fakeDownloader{},
 		AudioProcessor: &fakeAudioProcessor{audioPath: audioPath},
 		ASREngine:      &fakeASR{},
@@ -99,6 +100,7 @@ func TestUseCaseRunsEndToEndForLocalAudioInput(t *testing.T) {
 			MediaPath:  mediaPath,
 			Metadata:   map[string]string{"filename": "voice.wav"},
 		}},
+		URLInspector:   &fakeURLInspector{},
 		Downloader:     &fakeDownloader{},
 		AudioProcessor: audioProcessor,
 		ASREngine:      &fakeASR{},
@@ -145,6 +147,7 @@ func TestUseCaseRunsEndToEndForLocalVideoInput(t *testing.T) {
 			MediaPath:  mediaPath,
 			Metadata:   map[string]string{"filename": "meeting.mp4"},
 		}},
+		URLInspector:   &fakeURLInspector{},
 		Downloader:     &fakeDownloader{},
 		AudioProcessor: audioProcessor,
 		ASREngine:      &fakeASR{},
@@ -173,7 +176,7 @@ func TestUseCaseRunsEndToEndForLocalVideoInput(t *testing.T) {
 
 func TestUseCaseDownloadsURLAndCleansIntermediateFiles(t *testing.T) {
 	tempDir := t.TempDir()
-	workDir := filepath.Join(tempDir, "jobs", "url-video")
+	workDir := filepath.Join(tempDir, "jobs", "Video-abc123")
 	downloadedPath := filepath.Join(workDir, "video.m4a")
 	audioPath := filepath.Join(workDir, "video.wav")
 
@@ -184,9 +187,10 @@ func TestUseCaseDownloadsURLAndCleansIntermediateFiles(t *testing.T) {
 			RawInput:   "https://example.com/video",
 			Title:      "video",
 			Site:       "example.com",
-			WorkDir:    workDir,
+			WorkDir:    filepath.Join(tempDir, "jobs", "url-video"),
 			Metadata:   map[string]string{"url": "https://example.com/video"},
 		}},
+		URLInspector:   &fakeURLInspector{metadata: map[string]string{"id": "abc123", "title": "Video"}},
 		Downloader:     &fakeDownloader{mediaPath: downloadedPath},
 		AudioProcessor: &fakeAudioProcessor{audioPath: audioPath},
 		ASREngine:      &fakeASR{},
@@ -214,6 +218,122 @@ func TestUseCaseDownloadsURLAndCleansIntermediateFiles(t *testing.T) {
 	}
 }
 
+func TestUseCaseUsesInspectedURLTitleAndIDForJobPath(t *testing.T) {
+	tempDir := t.TempDir()
+	resolvedWorkDir := filepath.Join(tempDir, "jobs", "url-watch-random")
+	downloadedPath := filepath.Join(tempDir, "jobs", "Bad-Title-Episode-1-abc123", "video.m4a")
+	audioPath := filepath.Join(tempDir, "jobs", "Bad-Title-Episode-1-abc123", "video.wav")
+
+	exporter := &fakeExporter{paths: []string{filepath.Join(tempDir, "outputs", "video.txt")}}
+	uc := NewUseCase(Dependencies{
+		Resolver: &fakeResolver{asset: domain.MediaAsset{
+			JobID:      "url-watch-random",
+			SourceType: domain.SourceTypeURL,
+			RawInput:   "https://example.com/watch?v=abc123",
+			Title:      "watch",
+			Site:       "example.com",
+			WorkDir:    resolvedWorkDir,
+			Metadata:   map[string]string{"url": "https://example.com/watch?v=abc123"},
+		}},
+		URLInspector: &fakeURLInspector{metadata: map[string]string{
+			"id":    "abc123",
+			"title": "Bad / Title: Episode 1",
+		}},
+		Downloader:     &fakeDownloader{mediaPath: downloadedPath},
+		AudioProcessor: &fakeAudioProcessor{audioPath: audioPath},
+		ASREngine:      &fakeASR{},
+		Exporter:       exporter,
+	})
+
+	result, err := uc.Run(context.Background(), Request{
+		Input:            "https://example.com/watch?v=abc123",
+		Language:         "auto",
+		Model:            "small",
+		Formats:          []domain.OutputFormat{domain.OutputFormatTXT},
+		KeepIntermediate: true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	wantJobID := "Bad-Title-Episode-1-abc123"
+	if result.JobID != wantJobID {
+		t.Fatalf("JobID = %q, want %q", result.JobID, wantJobID)
+	}
+	if result.WorkDir != filepath.Join(tempDir, "jobs", wantJobID) {
+		t.Fatalf("WorkDir = %q, want stable title/id directory", result.WorkDir)
+	}
+	if exporter.transcript.Metadata["work_dir"] != result.WorkDir {
+		t.Fatalf("export work_dir = %q, want %q", exporter.transcript.Metadata["work_dir"], result.WorkDir)
+	}
+}
+
+func TestUseCasePreservesBilibiliIDCaseInURLJobPath(t *testing.T) {
+	result := runURLNamingCase(t, "Bilibili Clip", "BV1GUoNB5E1X", "https://www.bilibili.com/video/BV1GUoNB5E1X")
+
+	if result.JobID != "Bilibili-Clip-BV1GUoNB5E1X" {
+		t.Fatalf("JobID = %q, want Bilibili ID casing preserved", result.JobID)
+	}
+}
+
+func TestUseCasePreservesChineseTitleInURLJobPath(t *testing.T) {
+	result := runURLNamingCase(t, "中文 标题：第一集", "BV1GUoNB5E1X", "https://www.bilibili.com/video/BV1GUoNB5E1X")
+
+	if result.JobID != "中文-标题-第一集-BV1GUoNB5E1X" {
+		t.Fatalf("JobID = %q, want Chinese title preserved", result.JobID)
+	}
+}
+
+func TestUseCaseFallsBackToURLHashWhenMetadataIDIsMissing(t *testing.T) {
+	rawURL := "https://example.com/watch?v=missing-id"
+	result := runURLNamingCase(t, "Fallback Clip", "", rawURL)
+
+	wantJobID := "Fallback-Clip-url-" + shortHash(rawURL)
+	if result.JobID != wantJobID {
+		t.Fatalf("JobID = %q, want %q", result.JobID, wantJobID)
+	}
+}
+
+func runURLNamingCase(t *testing.T, title string, id string, rawURL string) Result {
+	t.Helper()
+
+	tempDir := t.TempDir()
+	workDir := filepath.Join(tempDir, "jobs", "url-preliminary")
+	metadata := map[string]string{"title": title}
+	if id != "" {
+		metadata["id"] = id
+	}
+
+	uc := NewUseCase(Dependencies{
+		Resolver: &fakeResolver{asset: domain.MediaAsset{
+			JobID:      "url-preliminary",
+			SourceType: domain.SourceTypeURL,
+			RawInput:   rawURL,
+			Title:      "preliminary",
+			Site:       "example.com",
+			WorkDir:    workDir,
+			Metadata:   map[string]string{"url": rawURL},
+		}},
+		URLInspector:   &fakeURLInspector{metadata: metadata},
+		Downloader:     &fakeDownloader{mediaPath: filepath.Join(tempDir, "downloaded.m4a")},
+		AudioProcessor: &fakeAudioProcessor{audioPath: filepath.Join(tempDir, "audio.wav")},
+		ASREngine:      &fakeASR{},
+		Exporter:       &fakeExporter{paths: []string{filepath.Join(tempDir, "out.txt")}},
+	})
+
+	result, err := uc.Run(context.Background(), Request{
+		Input:            rawURL,
+		Language:         "auto",
+		Model:            "small",
+		Formats:          []domain.OutputFormat{domain.OutputFormatTXT},
+		KeepIntermediate: true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	return result
+}
+
 func TestUseCaseReportsMissingDependency(t *testing.T) {
 	wantErr := errors.New("yt-dlp executable not found")
 	reporter := &recordingReporter{}
@@ -227,6 +347,7 @@ func TestUseCaseReportsMissingDependency(t *testing.T) {
 			WorkDir:    t.TempDir(),
 			Metadata:   map[string]string{"url": "https://example.com/video"},
 		}},
+		URLInspector:   &fakeURLInspector{},
 		Downloader:     &fakeDownloader{err: wantErr},
 		AudioProcessor: &fakeAudioProcessor{},
 		ASREngine:      &fakeASR{},
@@ -266,6 +387,7 @@ func TestUseCaseReportsMissingModel(t *testing.T) {
 			WorkDir:    t.TempDir(),
 			MediaPath:  "clip.wav",
 		}},
+		URLInspector:   &fakeURLInspector{},
 		Downloader:     &fakeDownloader{},
 		AudioProcessor: &fakeAudioProcessor{audioPath: filepath.Join(t.TempDir(), "clip.wav")},
 		ASREngine:      &fakeASR{err: wantErr},
@@ -304,6 +426,7 @@ func TestUseCaseWrapsFailureWithStage(t *testing.T) {
 			WorkDir:    t.TempDir(),
 			MediaPath:  "clip.mp4",
 		}},
+		URLInspector:   &fakeURLInspector{},
 		Downloader:     &fakeDownloader{},
 		AudioProcessor: &fakeAudioProcessor{err: wantErr},
 		ASREngine:      &fakeASR{},
@@ -349,6 +472,32 @@ func (r *fakeResolver) Resolve(_ context.Context, _ string) (domain.MediaAsset, 
 		return domain.MediaAsset{}, r.err
 	}
 	return r.asset, nil
+}
+
+type fakeURLInspector struct {
+	metadata map[string]string
+	err      error
+}
+
+func (i *fakeURLInspector) Inspect(_ context.Context, asset domain.MediaAsset) (domain.MediaAsset, error) {
+	if i.err != nil {
+		return domain.MediaAsset{}, i.err
+	}
+	if len(i.metadata) == 0 {
+		return asset, nil
+	}
+	merged := make(map[string]string, len(asset.Metadata)+len(i.metadata))
+	for key, value := range asset.Metadata {
+		merged[key] = value
+	}
+	for key, value := range i.metadata {
+		merged[key] = value
+	}
+	asset.Metadata = merged
+	if title := i.metadata["title"]; title != "" {
+		asset.Title = title
+	}
+	return asset, nil
 }
 
 type fakeDownloader struct {
