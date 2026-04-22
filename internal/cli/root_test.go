@@ -138,6 +138,35 @@ func TestTranscribeFormatsDownloadDependencyError(t *testing.T) {
 	}
 }
 
+func TestTranscribeFormatsYTDLPJavaScriptRuntimeDependencyError(t *testing.T) {
+	cfg := testConfig(t)
+	transcriber := &fakeTranscriber{
+		err: &transcription.StageError{
+			Stage: domain.JobStatusResolving,
+			Err:   errors.New("yt-dlp read metadata failed: WARNING: [youtube] No supported JavaScript runtime could be found"),
+		},
+	}
+
+	_, err := executeTestCommand(t, []string{"transcribe", "https://example.com/video"}, cfg, transcriber)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+	if ExitCode(err) != ExitDependency {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitDependency)
+	}
+
+	formatted := FormatError(err)
+	for _, want := range []string{
+		"stage: RESOLVING",
+		"type: dependency",
+		"advice: Install deno or configure yt-dlp with --js-runtimes",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParameterErrorUsesUserFacingFormat(t *testing.T) {
 	_, err := executeTestCommand(t, []string{"transcribe", "media.mp4", "--lang", "fr"}, testConfig(t), &fakeTranscriber{})
 	if err == nil {
@@ -369,6 +398,7 @@ func TestDoctorReportsMissingDependencies(t *testing.T) {
 
 	for _, want := range []string{
 		"yt-dlp=missing",
+		"deno=missing",
 		"ffmpeg=missing",
 		"whisper-cli=missing",
 		"model_file=missing",
@@ -384,6 +414,7 @@ func TestDoctorReportsMissingDependencies(t *testing.T) {
 func TestDoctorReportsHealthyEnvironment(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeExecutable(t, filepath.Join(binDir, "yt-dlp"), "yt-dlp 2026.01.01")
+	writeFakeExecutable(t, filepath.Join(binDir, "deno"), "deno 2.3.0")
 	writeFakeExecutable(t, filepath.Join(binDir, "ffmpeg"), "ffmpeg version 7.0")
 	writeFakeExecutable(t, filepath.Join(binDir, "whisper-cli"), "whisper-cli 1.7.0")
 	t.Setenv("PATH", binDir)
@@ -402,6 +433,7 @@ func TestDoctorReportsHealthyEnvironment(t *testing.T) {
 	for _, want := range []string{
 		"yt-dlp=ok",
 		"version=yt-dlp 2026.01.01",
+		"deno=ok",
 		"ffmpeg=ok",
 		"whisper-cli=ok",
 		"model_file=ok",

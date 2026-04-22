@@ -3,5 +3,5 @@ name = "textdrain"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "yt-dlp>=2026.3.17",
+    "yt-dlp[default]>=2026.3.17",
 ]

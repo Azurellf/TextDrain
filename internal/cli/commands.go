@@ -242,7 +242,7 @@ func printDoctorReport(cmd *cobra.Command, report environment.Report) error {
 	if _, err := fmt.Fprintln(out, "Tools:"); err != nil {
 		return err
 	}
-	for _, tool := range []environment.ToolCheck{report.Tools.YTDLP, report.Tools.FFmpeg, report.Tools.WhisperCLI} {
+	for _, tool := range []environment.ToolCheck{report.Tools.YTDLP, report.Tools.Deno, report.Tools.FFmpeg, report.Tools.WhisperCLI} {
 		if err := printToolCheck(out, tool); err != nil {
 			return err
 		}

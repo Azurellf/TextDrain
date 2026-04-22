@@ -37,6 +37,13 @@ Run Python tools through uv:
 uv run yt-dlp --version
 ```
 
+Current `yt-dlp` YouTube extraction also needs a supported JavaScript runtime. Install `deno` and ensure it is on `PATH`:
+
+```bash
+brew install deno
+deno --version
+```
+
 If you want commands such as `textdrain doctor` to discover `yt-dlp` from the virtual environment, either run TextDrain through `uv run`:
 
 ```bash
@@ -125,6 +132,7 @@ textdrain doctor
 The command checks:
 
 - Whether `yt-dlp`, `ffmpeg`, and `whisper-cli` are available and executable
+- Whether `deno` is available for `yt-dlp` JavaScript extraction
 - Version output for each external tool
 - The configured model directory and default model file
 - Default config, cache, jobs, and model paths

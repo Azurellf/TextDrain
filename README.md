@@ -5,6 +5,7 @@ TextDrain is a local-first CLI for downloading media, preparing audio, running o
 The MVP uses a Go CLI as the orchestrator and delegates heavy media work to mature local tools:
 
 - `yt-dlp` for URL metadata and downloads
+- `deno` for `yt-dlp` JavaScript extraction on sites such as YouTube
 - `ffmpeg` for audio extraction and normalization
 - `whisper-cli` from `whisper.cpp` for offline transcription
 
@@ -16,6 +17,7 @@ TextDrain supports local media files and `yt-dlp` compatible URLs. Transcription
 - Python `3.12+` for the uv-managed tool environment
 - `uv`
 - `yt-dlp`
+- `deno`
 - `ffmpeg`
 - `whisper-cli` from `whisper.cpp`
 - A local whisper.cpp model file in `.gguf` or legacy `.bin` format
@@ -29,6 +31,12 @@ uv sync
 ```
 
 This installs Python package tools declared by the project, including `yt-dlp`.
+
+Install `deno` so current `yt-dlp` can run site JavaScript needed by extractors such as YouTube. On macOS with Homebrew:
+
+```bash
+brew install deno
+```
 
 Run TextDrain through `uv run` when you want the Go process to discover `yt-dlp` from the uv environment:
 
@@ -59,6 +67,7 @@ Verify the external commands:
 
 ```bash
 uv run yt-dlp --version
+deno --version
 ffmpeg -version
 whisper-cli --version
 ```
@@ -239,6 +248,15 @@ If needed, synchronize the environment again:
 uv sync
 ```
 
+### `deno=missing`
+
+Install `deno` so `yt-dlp` can run the JavaScript needed by sites such as YouTube:
+
+```bash
+brew install deno
+deno --version
+```
+
 ### `ffmpeg=missing`
 
 Install `ffmpeg` and ensure it is available on `PATH`:
@@ -290,6 +308,8 @@ Check that the URL is supported by `yt-dlp` and that the network is reachable:
 ```bash
 uv run yt-dlp --dump-single-json "<yt-dlp-compatible-url>"
 ```
+
+If `yt-dlp` reports `No supported JavaScript runtime could be found`, install `deno` or configure `yt-dlp` with `--js-runtimes` for another supported runtime.
 
 If YouTube reports `Sign in to confirm you're not a bot`, pass browser cookies from a signed-in browser profile:
 

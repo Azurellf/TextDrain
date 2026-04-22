@@ -25,6 +25,7 @@ type Report struct {
 
 type ToolChecks struct {
 	YTDLP      ToolCheck
+	Deno       ToolCheck
 	FFmpeg     ToolCheck
 	WhisperCLI ToolCheck
 }
@@ -61,6 +62,7 @@ func Check(ctx context.Context, paths config.Paths, cfg config.Config) Report {
 	return Report{
 		Tools: ToolChecks{
 			YTDLP:      checkTool(ctx, "yt-dlp", []string{"--version"}, "Install yt-dlp: https://github.com/yt-dlp/yt-dlp#installation"),
+			Deno:       checkTool(ctx, "deno", []string{"--version"}, "Install deno, or configure yt-dlp with --js-runtimes for another supported JavaScript runtime."),
 			FFmpeg:     checkTool(ctx, "ffmpeg", []string{"-version"}, "Install ffmpeg: https://ffmpeg.org/download.html"),
 			WhisperCLI: checkTool(ctx, "whisper-cli", []string{"--version"}, "Install whisper.cpp and make whisper-cli available on PATH."),
 		},
@@ -77,6 +79,8 @@ func Check(ctx context.Context, paths config.Paths, cfg config.Config) Report {
 func (r Report) Healthy() bool {
 	return r.Tools.YTDLP.Found &&
 		r.Tools.YTDLP.Executable &&
+		r.Tools.Deno.Found &&
+		r.Tools.Deno.Executable &&
 		r.Tools.FFmpeg.Found &&
 		r.Tools.FFmpeg.Executable &&
 		r.Tools.WhisperCLI.Found &&

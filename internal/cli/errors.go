@@ -175,6 +175,9 @@ func pipelineErrorDetails(stage domain.JobStatus, err error) (ErrorKind, int, st
 	if strings.Contains(reason, "executable file not found") || strings.Contains(reason, "not found in $path") {
 		return ErrorKindDependency, ExitDependency, "Install the required external tool and ensure it is available on PATH."
 	}
+	if strings.Contains(reason, "no supported javascript runtime") {
+		return ErrorKindDependency, ExitDependency, "Install deno or configure yt-dlp with --js-runtimes for another supported JavaScript runtime."
+	}
 	if strings.Contains(reason, "sign in to confirm") || strings.Contains(reason, "not a bot") || strings.Contains(reason, "cookies-from-browser") || strings.Contains(reason, "cookies for the authentication") {
 		return ErrorKindDownload, ExitRuntime, "Pass YouTube login cookies with --cookies-from-browser <browser> or an exported cookies.txt file with --cookies <path>."
 	}
