@@ -150,6 +150,44 @@ func TestYTDLPFetchUsesInspectedAssetMetadata(t *testing.T) {
 	}
 }
 
+func TestYTDLPPassesCookieOptionsToMetadataAndDownload(t *testing.T) {
+	argLogPath := filepath.Join(t.TempDir(), "yt-dlp-args.log")
+	binary := writeFakeYTDLP(t, fakeYTDLPConfig{
+		metadataJSON: readCommandFixture(t, "ytdlp_metadata_youtube.json"),
+		argLogPath:   argLogPath,
+	})
+	downloader := NewYTDLPWithOptions(binary, YTDLPOptions{
+		CookiesFromBrowser: "safari",
+	})
+	asset := domain.MediaAsset{
+		SourceType: domain.SourceTypeURL,
+		RawInput:   "https://example.com/watch?v=abc123",
+		WorkDir:    filepath.Join(t.TempDir(), "job"),
+	}
+
+	inspected, err := downloader.Inspect(context.Background(), asset)
+	if err != nil {
+		t.Fatalf("Inspect() error = %v", err)
+	}
+	if _, err := downloader.Fetch(context.Background(), inspected, inspected.WorkDir); err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+
+	logData, err := os.ReadFile(argLogPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	log := string(logData)
+	for _, want := range []string{
+		"--dump-single-json --no-playlist --cookies-from-browser safari https://example.com/watch?v=abc123",
+		"--no-playlist --cookies-from-browser safari -f bestaudio/best -o ",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("yt-dlp arg log does not contain %q:\n%s", want, log)
+		}
+	}
+}
+
 func TestYTDLPFetchRejectsLocalAsset(t *testing.T) {
 	_, err := NewYTDLPWithBinary("unused").Fetch(context.Background(), domain.MediaAsset{
 		SourceType: domain.SourceTypeLocalFile,
@@ -180,6 +218,7 @@ type fakeYTDLPConfig struct {
 	failBestAudio        bool
 	failRepeatedMetadata bool
 	fallbackExtension    string
+	argLogPath           string
 }
 
 func writeFakeYTDLP(t *testing.T, cfg fakeYTDLPConfig) string {
@@ -195,6 +234,9 @@ func writeFakeYTDLP(t *testing.T, cfg fakeYTDLPConfig) string {
 
 	script := `#!/bin/sh
 set -eu
+if [ "` + shellSingleQuote(cfg.argLogPath) + `" != "" ]; then
+  printf '%s\n' "$*" >> '` + shellSingleQuote(cfg.argLogPath) + `'
+fi
 if [ "$1" = "--dump-single-json" ]; then
   if [ "` + boolString(cfg.failRepeatedMetadata) + `" = "true" ]; then
     if [ -f '` + shellSingleQuote(metadataGuard) + `' ]; then

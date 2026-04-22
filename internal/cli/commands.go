@@ -21,11 +21,13 @@ import (
 )
 
 type transcribeOptions struct {
-	input            string
-	language         string
-	model            string
-	outputDir        string
-	keepIntermediate bool
+	input              string
+	language           string
+	model              string
+	outputDir          string
+	keepIntermediate   bool
+	cookiesFromBrowser string
+	cookiesFile        string
 }
 
 func newTranscribeCommand(cfg config.Config, transcriber Transcriber) *cobra.Command {
@@ -57,8 +59,11 @@ func newTranscribeCommand(cfg config.Config, transcriber Transcriber) *cobra.Com
 			if opts.model == "" {
 				return NewParameterError("--model cannot be empty")
 			}
+			if opts.cookiesFromBrowser != "" && opts.cookiesFile != "" {
+				return NewParameterError("--cookies-from-browser and --cookies cannot be used together")
+			}
 			if transcriber == nil {
-				transcriber = newDefaultTranscriber(cfg, opts.language, cmd.OutOrStdout())
+				transcriber = newDefaultTranscriber(cfg, opts, cmd.OutOrStdout())
 			}
 
 			result, err := transcriber.Run(cmd.Context(), transcription.Request{
@@ -84,6 +89,8 @@ func newTranscribeCommand(cfg config.Config, transcriber Transcriber) *cobra.Com
 	cmd.Flags().StringVar(&opts.model, "model", opts.model, "Model name to use for transcription")
 	cmd.Flags().StringVar(&opts.outputDir, "output", opts.outputDir, "Directory for transcript output")
 	cmd.Flags().BoolVar(&opts.keepIntermediate, "keep-intermediate", opts.keepIntermediate, "Keep intermediate media and audio files")
+	cmd.Flags().StringVar(&opts.cookiesFromBrowser, "cookies-from-browser", opts.cookiesFromBrowser, "Browser profile to read yt-dlp cookies from, such as chrome or safari")
+	cmd.Flags().StringVar(&opts.cookiesFile, "cookies", opts.cookiesFile, "Path to a cookies.txt file for yt-dlp")
 
 	return cmd
 }
@@ -97,10 +104,13 @@ func (w statusWriter) Update(_ context.Context, status domain.JobStatus) error {
 	return err
 }
 
-func newDefaultTranscriber(cfg config.Config, language string, out io.Writer) Transcriber {
-	ytdlp := downloader.NewYTDLP()
+func newDefaultTranscriber(cfg config.Config, opts transcribeOptions, out io.Writer) Transcriber {
+	ytdlp := downloader.NewYTDLPWithOptions("", downloader.YTDLPOptions{
+		CookiesFromBrowser: opts.cookiesFromBrowser,
+		CookiesFile:        opts.cookiesFile,
+	})
 	return transcription.NewUseCase(transcription.Dependencies{
-		Resolver:       ingestion.NewResolver(cfg.JobsDir, language),
+		Resolver:       ingestion.NewResolver(cfg.JobsDir, opts.language),
 		URLInspector:   ytdlp,
 		Downloader:     ytdlp,
 		AudioProcessor: media.NewFFmpeg(),

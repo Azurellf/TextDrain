@@ -299,6 +299,53 @@ func TestTranscribeRejectsUnsupportedLanguage(t *testing.T) {
 	}
 }
 
+func TestTranscribeRejectsConflictingCookieFlags(t *testing.T) {
+	_, err := executeTestCommand(t, []string{
+		"transcribe",
+		"https://example.com/video",
+		"--cookies-from-browser",
+		"safari",
+		"--cookies",
+		filepath.Join(t.TempDir(), "cookies.txt"),
+	}, testConfig(t), nil)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+	if ExitCode(err) != ExitParameter {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitParameter)
+	}
+	formatted := FormatError(err)
+	if !strings.Contains(formatted, "--cookies-from-browser and --cookies cannot be used together") {
+		t.Fatalf("formatted error missing cookie flag conflict:\n%s", formatted)
+	}
+}
+
+func TestTranscribeFormatsYTDLPBotCookieAdvice(t *testing.T) {
+	cfg := testConfig(t)
+	transcriber := &fakeTranscriber{
+		err: &transcription.StageError{
+			Stage: domain.JobStatusResolving,
+			Err:   errors.New("yt-dlp read metadata failed: ERROR: [youtube] CIUtEnnjA2U: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies for the authentication"),
+		},
+	}
+
+	_, err := executeTestCommand(t, []string{"transcribe", "https://www.youtube.com/watch?v=CIUtEnnjA2U"}, cfg, transcriber)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+
+	formatted := FormatError(err)
+	for _, want := range []string{
+		"stage: RESOLVING",
+		"type: download",
+		"advice: Pass YouTube login cookies with --cookies-from-browser <browser>",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestDoctorRejectsArguments(t *testing.T) {
 	_, err := executeTestCommand(t, []string{"doctor", "extra"}, testConfig(t), nil)
 	if err == nil {

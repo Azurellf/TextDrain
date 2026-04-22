@@ -133,6 +133,13 @@ Transcribe a URL supported by `yt-dlp`:
 uv run go run ./cmd/textdrain transcribe "<yt-dlp-compatible-url>"
 ```
 
+Use browser cookies for sites that require a signed-in session:
+
+```bash
+uv run go run ./cmd/textdrain transcribe "https://www.youtube.com/watch?v=CIUtEnnjA2U" --cookies-from-browser safari
+uv run go run ./cmd/textdrain transcribe "<yt-dlp-compatible-url>" --cookies ./cookies.txt
+```
+
 Specify the transcription language:
 
 ```bash
@@ -284,7 +291,15 @@ Check that the URL is supported by `yt-dlp` and that the network is reachable:
 uv run yt-dlp --dump-single-json "<yt-dlp-compatible-url>"
 ```
 
-TextDrain does not handle DRM-protected content, login-only content, or browser session extraction in the MVP.
+If YouTube reports `Sign in to confirm you're not a bot`, pass browser cookies from a signed-in browser profile:
+
+```bash
+uv run go run ./cmd/textdrain transcribe "https://www.youtube.com/watch?v=CIUtEnnjA2U" --cookies-from-browser safari
+```
+
+You can also export a cookies.txt file and pass it with `--cookies ./cookies.txt`.
+
+TextDrain does not handle DRM-protected content.
 
 ### Audio Extraction Failed
 

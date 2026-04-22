@@ -29,7 +29,14 @@ var (
 
 // YTDLP shells out to yt-dlp to inspect and download URL media.
 type YTDLP struct {
-	binary string
+	binary  string
+	options YTDLPOptions
+}
+
+// YTDLPOptions configures optional yt-dlp arguments shared by metadata and download calls.
+type YTDLPOptions struct {
+	CookiesFromBrowser string
+	CookiesFile        string
 }
 
 // NewYTDLP creates a downloader using yt-dlp from PATH.
@@ -39,10 +46,17 @@ func NewYTDLP() *YTDLP {
 
 // NewYTDLPWithBinary creates a downloader using an explicit yt-dlp-compatible executable.
 func NewYTDLPWithBinary(binary string) *YTDLP {
+	return NewYTDLPWithOptions(binary, YTDLPOptions{})
+}
+
+// NewYTDLPWithOptions creates a downloader using an explicit executable and options.
+func NewYTDLPWithOptions(binary string, options YTDLPOptions) *YTDLP {
 	if strings.TrimSpace(binary) == "" {
 		binary = defaultYTDLPBinary
 	}
-	return &YTDLP{binary: binary}
+	options.CookiesFromBrowser = strings.TrimSpace(options.CookiesFromBrowser)
+	options.CookiesFile = strings.TrimSpace(options.CookiesFile)
+	return &YTDLP{binary: binary, options: options}
 }
 
 // Inspect enriches a URL asset with yt-dlp metadata without downloading media.
@@ -134,7 +148,9 @@ func (d *YTDLP) Metadata(ctx context.Context, rawURL string) (Metadata, error) {
 		return Metadata{}, errors.New("metadata URL cannot be empty")
 	}
 
-	stdout, stderr, err := d.run(ctx, "--dump-single-json", "--no-playlist", rawURL)
+	args := append([]string{"--dump-single-json", "--no-playlist"}, d.authArgs()...)
+	args = append(args, rawURL)
+	stdout, stderr, err := d.run(ctx, args...)
 	if err != nil {
 		return Metadata{}, commandError("read metadata", err, stderr)
 	}
@@ -153,10 +169,12 @@ func (d *YTDLP) Metadata(ctx context.Context, rawURL string) (Metadata, error) {
 }
 
 func (d *YTDLP) download(ctx context.Context, rawURL string, outputTemplate string) (string, error) {
-	args := []string{"--no-playlist", "-f", "bestaudio/best", "-o", outputTemplate, rawURL}
+	args := append([]string{"--no-playlist"}, d.authArgs()...)
+	args = append(args, "-f", "bestaudio/best", "-o", outputTemplate, rawURL)
 	_, stderr, err := d.run(ctx, args...)
 	if err != nil {
-		fallbackArgs := []string{"--no-playlist", "-f", "best", "-o", outputTemplate, rawURL}
+		fallbackArgs := append([]string{"--no-playlist"}, d.authArgs()...)
+		fallbackArgs = append(fallbackArgs, "-f", "best", "-o", outputTemplate, rawURL)
 		if _, fallbackStderr, fallbackErr := d.run(ctx, fallbackArgs...); fallbackErr != nil {
 			return "", commandError("download media", fallbackErr, append(stderr, fallbackStderr...))
 		}
@@ -181,6 +199,17 @@ func (d *YTDLP) run(ctx context.Context, args ...string) ([]byte, []byte, error)
 		return stdout.Bytes(), stderr.Bytes(), ctxErr
 	}
 	return stdout.Bytes(), stderr.Bytes(), err
+}
+
+func (d *YTDLP) authArgs() []string {
+	var args []string
+	if d.options.CookiesFromBrowser != "" {
+		args = append(args, "--cookies-from-browser", d.options.CookiesFromBrowser)
+	}
+	if d.options.CookiesFile != "" {
+		args = append(args, "--cookies", d.options.CookiesFile)
+	}
+	return args
 }
 
 // Metadata is the subset of yt-dlp JSON used by TextDrain.

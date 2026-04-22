@@ -102,10 +102,19 @@ Supported flags:
 - `--model <name>`
 - `--output <dir>`
 - `--keep-intermediate`
+- `--cookies-from-browser <browser>`
+- `--cookies <cookies.txt>`
 
 The command resolves the input, downloads URL media when needed, prepares normalized audio with `ffmpeg`, transcribes with `whisper-cli`, exports the configured transcript formats, and removes intermediate media unless `--keep-intermediate` is set.
 
 If `--output` is omitted, exports are written under `outputs/<job-id>/` from the current working directory.
+
+For sites that require a signed-in browser session, pass cookies through to `yt-dlp`:
+
+```bash
+textdrain transcribe "https://www.youtube.com/watch?v=CIUtEnnjA2U" --cookies-from-browser safari
+textdrain transcribe "<yt-dlp-compatible-url>" --cookies ./cookies.txt
+```
 
 ### Check The Environment
 
