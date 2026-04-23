@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -353,15 +355,68 @@ func applyStableURLJobPath(asset domain.MediaAsset) domain.MediaAsset {
 		jobsDir = "."
 	}
 
-	title := firstNonEmpty(asset.Title, asset.Metadata["title"], "untitled")
+	site := siteNameFromAsset(asset)
 	id := strings.TrimSpace(asset.Metadata["id"])
 	if id != "" {
-		asset.JobID = fmt.Sprintf("%s-%s", sanitizeURLJobPart(title), sanitizeURLJobPart(id))
+		asset.JobID = fmt.Sprintf("%s-%s", site, sanitizeURLJobPart(id))
 	} else {
-		asset.JobID = fmt.Sprintf("%s-url-%s", sanitizeURLJobPart(title), shortHash(asset.RawInput))
+		asset.JobID = fmt.Sprintf("%s-url-%s", site, shortHash(asset.RawInput))
 	}
 	asset.WorkDir = filepath.Join(jobsDir, asset.JobID)
 	return asset
+}
+
+func siteNameFromAsset(asset domain.MediaAsset) string {
+	candidates := []string{
+		asset.Metadata["extractor_key"],
+		asset.Metadata["extractor"],
+		asset.Site,
+		hostFromRawURL(asset.RawInput),
+	}
+
+	for _, candidate := range candidates {
+		if site := normalizeSiteName(candidate); site != "" {
+			return site
+		}
+	}
+	return "site"
+}
+
+func hostFromRawURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	host := parsed.Host
+	if host == "" {
+		return ""
+	}
+	if withoutPort, _, err := net.SplitHostPort(host); err == nil {
+		host = withoutPort
+	}
+	return host
+}
+
+func normalizeSiteName(input string) string {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" {
+		return ""
+	}
+
+	switch {
+	case strings.Contains(input, "youtube"), strings.Contains(input, "youtu.be"):
+		return "youtube"
+	case strings.Contains(input, "bilibili"):
+		return "bilibili"
+	}
+
+	input = strings.TrimPrefix(input, "www.")
+	input = strings.TrimPrefix(input, "m.")
+	site := sanitizeURLJobPart(input)
+	if site == "untitled" {
+		return ""
+	}
+	return site
 }
 
 func sanitizeURLJobPart(input string) string {

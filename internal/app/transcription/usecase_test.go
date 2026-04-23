@@ -176,7 +176,7 @@ func TestUseCaseRunsEndToEndForLocalVideoInput(t *testing.T) {
 
 func TestUseCaseDownloadsURLAndCleansIntermediateFiles(t *testing.T) {
 	tempDir := t.TempDir()
-	workDir := filepath.Join(tempDir, "jobs", "Video-abc123")
+	workDir := filepath.Join(tempDir, "jobs", "example-com-abc123")
 	downloadedPath := filepath.Join(workDir, "video.m4a")
 	audioPath := filepath.Join(workDir, "video.wav")
 
@@ -218,26 +218,27 @@ func TestUseCaseDownloadsURLAndCleansIntermediateFiles(t *testing.T) {
 	}
 }
 
-func TestUseCaseUsesInspectedURLTitleAndIDForJobPath(t *testing.T) {
+func TestUseCaseUsesInspectedURLSiteAndIDForJobPath(t *testing.T) {
 	tempDir := t.TempDir()
 	resolvedWorkDir := filepath.Join(tempDir, "jobs", "url-watch-random")
-	downloadedPath := filepath.Join(tempDir, "jobs", "Bad-Title-Episode-1-abc123", "video.m4a")
-	audioPath := filepath.Join(tempDir, "jobs", "Bad-Title-Episode-1-abc123", "video.wav")
+	downloadedPath := filepath.Join(tempDir, "jobs", "youtube-QsZFBqtgI8A", "video.m4a")
+	audioPath := filepath.Join(tempDir, "jobs", "youtube-QsZFBqtgI8A", "video.wav")
 
 	exporter := &fakeExporter{paths: []string{filepath.Join(tempDir, "outputs", "video.txt")}}
 	uc := NewUseCase(Dependencies{
 		Resolver: &fakeResolver{asset: domain.MediaAsset{
 			JobID:      "url-watch-random",
 			SourceType: domain.SourceTypeURL,
-			RawInput:   "https://example.com/watch?v=abc123",
+			RawInput:   "https://www.youtube.com/watch?v=QsZFBqtgI8A",
 			Title:      "watch",
-			Site:       "example.com",
+			Site:       "www.youtube.com",
 			WorkDir:    resolvedWorkDir,
-			Metadata:   map[string]string{"url": "https://example.com/watch?v=abc123"},
+			Metadata:   map[string]string{"url": "https://www.youtube.com/watch?v=QsZFBqtgI8A"},
 		}},
 		URLInspector: &fakeURLInspector{metadata: map[string]string{
-			"id":    "abc123",
-			"title": "Bad / Title: Episode 1",
+			"id":            "QsZFBqtgI8A",
+			"title":         "Bad / Title: Episode 1",
+			"extractor_key": "Youtube",
 		}},
 		Downloader:     &fakeDownloader{mediaPath: downloadedPath},
 		AudioProcessor: &fakeAudioProcessor{audioPath: audioPath},
@@ -246,7 +247,7 @@ func TestUseCaseUsesInspectedURLTitleAndIDForJobPath(t *testing.T) {
 	})
 
 	result, err := uc.Run(context.Background(), Request{
-		Input:            "https://example.com/watch?v=abc123",
+		Input:            "https://www.youtube.com/watch?v=QsZFBqtgI8A",
 		Language:         "auto",
 		Model:            "small",
 		Formats:          []domain.OutputFormat{domain.OutputFormatTXT},
@@ -256,12 +257,12 @@ func TestUseCaseUsesInspectedURLTitleAndIDForJobPath(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	wantJobID := "Bad-Title-Episode-1-abc123"
+	wantJobID := "youtube-QsZFBqtgI8A"
 	if result.JobID != wantJobID {
 		t.Fatalf("JobID = %q, want %q", result.JobID, wantJobID)
 	}
 	if result.WorkDir != filepath.Join(tempDir, "jobs", wantJobID) {
-		t.Fatalf("WorkDir = %q, want stable title/id directory", result.WorkDir)
+		t.Fatalf("WorkDir = %q, want stable site/id directory", result.WorkDir)
 	}
 	if exporter.transcript.Metadata["work_dir"] != result.WorkDir {
 		t.Fatalf("export work_dir = %q, want %q", exporter.transcript.Metadata["work_dir"], result.WorkDir)
@@ -269,50 +270,80 @@ func TestUseCaseUsesInspectedURLTitleAndIDForJobPath(t *testing.T) {
 }
 
 func TestUseCasePreservesBilibiliIDCaseInURLJobPath(t *testing.T) {
-	result := runURLNamingCase(t, "Bilibili Clip", "BV1GUoNB5E1X", "https://www.bilibili.com/video/BV1GUoNB5E1X")
+	result := runURLNamingCase(t, urlNamingCase{
+		title:  "Bilibili Clip",
+		id:     "BV1GUoNB5E1X",
+		rawURL: "https://www.bilibili.com/video/BV1GUoNB5E1X/",
+		site:   "www.bilibili.com",
+	})
 
-	if result.JobID != "Bilibili-Clip-BV1GUoNB5E1X" {
+	if result.JobID != "bilibili-BV1GUoNB5E1X" {
 		t.Fatalf("JobID = %q, want Bilibili ID casing preserved", result.JobID)
 	}
 }
 
-func TestUseCasePreservesChineseTitleInURLJobPath(t *testing.T) {
-	result := runURLNamingCase(t, "中文 标题：第一集", "BV1GUoNB5E1X", "https://www.bilibili.com/video/BV1GUoNB5E1X")
+func TestUseCaseOmitsTitleFromURLJobPath(t *testing.T) {
+	result := runURLNamingCase(t, urlNamingCase{
+		title:        "中文 标题：第一集",
+		id:           "BV1GUoNB5E1X",
+		rawURL:       "https://www.bilibili.com/video/BV1GUoNB5E1X/",
+		site:         "www.bilibili.com",
+		extractorKey: "BiliBili",
+	})
 
-	if result.JobID != "中文-标题-第一集-BV1GUoNB5E1X" {
-		t.Fatalf("JobID = %q, want Chinese title preserved", result.JobID)
+	if result.JobID != "bilibili-BV1GUoNB5E1X" {
+		t.Fatalf("JobID = %q, want URL title omitted", result.JobID)
 	}
 }
 
 func TestUseCaseFallsBackToURLHashWhenMetadataIDIsMissing(t *testing.T) {
 	rawURL := "https://example.com/watch?v=missing-id"
-	result := runURLNamingCase(t, "Fallback Clip", "", rawURL)
+	result := runURLNamingCase(t, urlNamingCase{
+		title:  "Fallback Clip",
+		rawURL: rawURL,
+		site:   "example.com",
+	})
 
-	wantJobID := "Fallback-Clip-url-" + shortHash(rawURL)
+	wantJobID := "example-com-url-" + shortHash(rawURL)
 	if result.JobID != wantJobID {
 		t.Fatalf("JobID = %q, want %q", result.JobID, wantJobID)
 	}
 }
 
-func runURLNamingCase(t *testing.T, title string, id string, rawURL string) Result {
+type urlNamingCase struct {
+	title        string
+	id           string
+	rawURL       string
+	site         string
+	extractor    string
+	extractorKey string
+}
+
+func runURLNamingCase(t *testing.T, tt urlNamingCase) Result {
 	t.Helper()
 
 	tempDir := t.TempDir()
 	workDir := filepath.Join(tempDir, "jobs", "url-preliminary")
-	metadata := map[string]string{"title": title}
-	if id != "" {
-		metadata["id"] = id
+	metadata := map[string]string{"title": tt.title}
+	if tt.id != "" {
+		metadata["id"] = tt.id
+	}
+	if tt.extractor != "" {
+		metadata["extractor"] = tt.extractor
+	}
+	if tt.extractorKey != "" {
+		metadata["extractor_key"] = tt.extractorKey
 	}
 
 	uc := NewUseCase(Dependencies{
 		Resolver: &fakeResolver{asset: domain.MediaAsset{
 			JobID:      "url-preliminary",
 			SourceType: domain.SourceTypeURL,
-			RawInput:   rawURL,
+			RawInput:   tt.rawURL,
 			Title:      "preliminary",
-			Site:       "example.com",
+			Site:       tt.site,
 			WorkDir:    workDir,
-			Metadata:   map[string]string{"url": rawURL},
+			Metadata:   map[string]string{"url": tt.rawURL},
 		}},
 		URLInspector:   &fakeURLInspector{metadata: metadata},
 		Downloader:     &fakeDownloader{mediaPath: filepath.Join(tempDir, "downloaded.m4a")},
@@ -322,7 +353,7 @@ func runURLNamingCase(t *testing.T, title string, id string, rawURL string) Resu
 	})
 
 	result, err := uc.Run(context.Background(), Request{
-		Input:            rawURL,
+		Input:            tt.rawURL,
 		Language:         "auto",
 		Model:            "small",
 		Formats:          []domain.OutputFormat{domain.OutputFormatTXT},
