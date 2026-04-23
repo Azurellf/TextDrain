@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -28,6 +29,7 @@ type transcribeOptions struct {
 	keepIntermediate   bool
 	cookiesFromBrowser string
 	cookiesFile        string
+	ytdlpArgs          []string
 }
 
 func newTranscribeCommand(cfg config.Config, transcriber Transcriber) *cobra.Command {
@@ -62,6 +64,17 @@ func newTranscribeCommand(cfg config.Config, transcriber Transcriber) *cobra.Com
 			if opts.cookiesFromBrowser != "" && opts.cookiesFile != "" {
 				return NewParameterError("--cookies-from-browser and --cookies cannot be used together")
 			}
+			if len(opts.ytdlpArgs) > 0 {
+				trimmed := opts.ytdlpArgs[:0]
+				for _, value := range opts.ytdlpArgs {
+					value = strings.TrimSpace(value)
+					if value == "" {
+						continue
+					}
+					trimmed = append(trimmed, value)
+				}
+				opts.ytdlpArgs = trimmed
+			}
 			if transcriber == nil {
 				transcriber = newDefaultTranscriber(cfg, opts, cmd.OutOrStdout())
 			}
@@ -91,6 +104,7 @@ func newTranscribeCommand(cfg config.Config, transcriber Transcriber) *cobra.Com
 	cmd.Flags().BoolVar(&opts.keepIntermediate, "keep-intermediate", opts.keepIntermediate, "Keep intermediate media and audio files")
 	cmd.Flags().StringVar(&opts.cookiesFromBrowser, "cookies-from-browser", opts.cookiesFromBrowser, "Browser profile to read yt-dlp cookies from, such as chrome or safari")
 	cmd.Flags().StringVar(&opts.cookiesFile, "cookies", opts.cookiesFile, "Path to a cookies.txt file for yt-dlp")
+	cmd.Flags().StringArrayVar(&opts.ytdlpArgs, "yt-dlp-arg", opts.ytdlpArgs, "Additional yt-dlp argument to pass through; repeat for multiple arguments")
 
 	return cmd
 }
@@ -108,6 +122,7 @@ func newDefaultTranscriber(cfg config.Config, opts transcribeOptions, out io.Wri
 	ytdlp := downloader.NewYTDLPWithOptions("", downloader.YTDLPOptions{
 		CookiesFromBrowser: opts.cookiesFromBrowser,
 		CookiesFile:        opts.cookiesFile,
+		ExtraArgs:          opts.ytdlpArgs,
 	})
 	return transcription.NewUseCase(transcription.Dependencies{
 		Resolver:       ingestion.NewResolver(cfg.JobsDir, opts.language),

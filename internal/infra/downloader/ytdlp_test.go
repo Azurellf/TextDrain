@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -188,6 +189,44 @@ func TestYTDLPPassesCookieOptionsToMetadataAndDownload(t *testing.T) {
 	}
 }
 
+func TestYTDLPPassesExtraArgsToMetadataAndDownload(t *testing.T) {
+	argLogPath := filepath.Join(t.TempDir(), "yt-dlp-args.log")
+	binary := writeFakeYTDLP(t, fakeYTDLPConfig{
+		metadataJSON: readCommandFixture(t, "ytdlp_metadata_youtube.json"),
+		argLogPath:   argLogPath,
+	})
+	downloader := NewYTDLPWithOptions(binary, YTDLPOptions{
+		ExtraArgs: []string{"--impersonate", "chrome", "--add-header", "Referer: https://www.bilibili.com"},
+	})
+	asset := domain.MediaAsset{
+		SourceType: domain.SourceTypeURL,
+		RawInput:   "https://example.com/watch?v=abc123",
+		WorkDir:    filepath.Join(t.TempDir(), "job"),
+	}
+
+	inspected, err := downloader.Inspect(context.Background(), asset)
+	if err != nil {
+		t.Fatalf("Inspect() error = %v", err)
+	}
+	if _, err := downloader.Fetch(context.Background(), inspected, inspected.WorkDir); err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+
+	logData, err := os.ReadFile(argLogPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	log := string(logData)
+	for _, want := range []string{
+		"--dump-single-json --no-playlist --impersonate chrome --add-header Referer: https://www.bilibili.com https://example.com/watch?v=abc123",
+		"--no-playlist --impersonate chrome --add-header Referer: https://www.bilibili.com -f bestaudio/best -o ",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("yt-dlp arg log does not contain %q:\n%s", want, log)
+		}
+	}
+}
+
 func TestYTDLPFetchRejectsLocalAsset(t *testing.T) {
 	_, err := NewYTDLPWithBinary("unused").Fetch(context.Background(), domain.MediaAsset{
 		SourceType: domain.SourceTypeLocalFile,
@@ -213,8 +252,25 @@ func TestYTDLPMetadataReportsParseError(t *testing.T) {
 	}
 }
 
+func TestYTDLPMetadataReportsRelevantTracebackLine(t *testing.T) {
+	binary := writeFakeYTDLP(t, fakeYTDLPConfig{
+		metadataStderr: "Traceback (most recent call last):\nyt_dlp.utils.YoutubeDLError: Impersonate target \"chrome\" is not available.\n",
+		metadataExit:   1,
+	})
+
+	_, err := NewYTDLPWithBinary(binary).Metadata(context.Background(), "https://example.com/video")
+	if err == nil {
+		t.Fatal("Metadata() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "YoutubeDLError: Impersonate target") {
+		t.Fatalf("Metadata() error = %v, want relevant traceback line", err)
+	}
+}
+
 type fakeYTDLPConfig struct {
 	metadataJSON         string
+	metadataStderr       string
+	metadataExit         int
 	failBestAudio        bool
 	failRepeatedMetadata bool
 	fallbackExtension    string
@@ -238,6 +294,12 @@ if [ "` + shellSingleQuote(cfg.argLogPath) + `" != "" ]; then
   printf '%s\n' "$*" >> '` + shellSingleQuote(cfg.argLogPath) + `'
 fi
 if [ "$1" = "--dump-single-json" ]; then
+  if [ "` + shellSingleQuote(cfg.metadataStderr) + `" != "" ]; then
+    printf '%s\n' '` + shellSingleQuote(cfg.metadataStderr) + `' >&2
+  fi
+  if [ "` + intString(cfg.metadataExit) + `" != "0" ]; then
+    exit ` + intString(cfg.metadataExit) + `
+  fi
   if [ "` + boolString(cfg.failRepeatedMetadata) + `" = "true" ]; then
     if [ -f '` + shellSingleQuote(metadataGuard) + `' ]; then
       echo "metadata already read" >&2
@@ -296,6 +358,10 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func intString(value int) string {
+	return strconv.Itoa(value)
 }
 
 func shellSingleQuote(input string) string {

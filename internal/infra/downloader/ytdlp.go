@@ -37,6 +37,7 @@ type YTDLP struct {
 type YTDLPOptions struct {
 	CookiesFromBrowser string
 	CookiesFile        string
+	ExtraArgs          []string
 }
 
 // NewYTDLP creates a downloader using yt-dlp from PATH.
@@ -56,6 +57,7 @@ func NewYTDLPWithOptions(binary string, options YTDLPOptions) *YTDLP {
 	}
 	options.CookiesFromBrowser = strings.TrimSpace(options.CookiesFromBrowser)
 	options.CookiesFile = strings.TrimSpace(options.CookiesFile)
+	options.ExtraArgs = trimArgs(options.ExtraArgs)
 	return &YTDLP{binary: binary, options: options}
 }
 
@@ -148,7 +150,7 @@ func (d *YTDLP) Metadata(ctx context.Context, rawURL string) (Metadata, error) {
 		return Metadata{}, errors.New("metadata URL cannot be empty")
 	}
 
-	args := append([]string{"--dump-single-json", "--no-playlist"}, d.authArgs()...)
+	args := append([]string{"--dump-single-json", "--no-playlist"}, d.commonArgs()...)
 	args = append(args, rawURL)
 	stdout, stderr, err := d.run(ctx, args...)
 	if err != nil {
@@ -169,11 +171,11 @@ func (d *YTDLP) Metadata(ctx context.Context, rawURL string) (Metadata, error) {
 }
 
 func (d *YTDLP) download(ctx context.Context, rawURL string, outputTemplate string) (string, error) {
-	args := append([]string{"--no-playlist"}, d.authArgs()...)
+	args := append([]string{"--no-playlist"}, d.commonArgs()...)
 	args = append(args, "-f", "bestaudio/best", "-o", outputTemplate, rawURL)
 	_, stderr, err := d.run(ctx, args...)
 	if err != nil {
-		fallbackArgs := append([]string{"--no-playlist"}, d.authArgs()...)
+		fallbackArgs := append([]string{"--no-playlist"}, d.commonArgs()...)
 		fallbackArgs = append(fallbackArgs, "-f", "best", "-o", outputTemplate, rawURL)
 		if _, fallbackStderr, fallbackErr := d.run(ctx, fallbackArgs...); fallbackErr != nil {
 			return "", commandError("download media", fallbackErr, append(stderr, fallbackStderr...))
@@ -201,13 +203,26 @@ func (d *YTDLP) run(ctx context.Context, args ...string) ([]byte, []byte, error)
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
-func (d *YTDLP) authArgs() []string {
+func (d *YTDLP) commonArgs() []string {
 	var args []string
 	if d.options.CookiesFromBrowser != "" {
 		args = append(args, "--cookies-from-browser", d.options.CookiesFromBrowser)
 	}
 	if d.options.CookiesFile != "" {
 		args = append(args, "--cookies", d.options.CookiesFile)
+	}
+	args = append(args, d.options.ExtraArgs...)
+	return args
+}
+
+func trimArgs(values []string) []string {
+	args := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		args = append(args, value)
 	}
 	return args
 }
@@ -357,7 +372,7 @@ func commandError(stage string, err error, stderr []byte) error {
 	if message == "" {
 		return fmt.Errorf("yt-dlp %s failed: %w", stage, err)
 	}
-	return fmt.Errorf("yt-dlp %s failed: %s: %w", stage, firstLine(message), err)
+	return fmt.Errorf("yt-dlp %s failed: %s: %w", stage, relevantLine(message), err)
 }
 
 func mergeMetadata(existing map[string]string, extra map[string]string) map[string]string {
@@ -415,4 +430,21 @@ func firstNonEmpty(values ...string) string {
 func firstLine(input string) string {
 	line, _, _ := strings.Cut(input, "\n")
 	return strings.TrimSpace(line)
+}
+
+func relevantLine(input string) string {
+	fallback := firstLine(input)
+	for _, line := range strings.Split(input, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.Contains(line, "ERROR:"),
+			strings.Contains(line, "Unable"),
+			strings.Contains(line, "HTTP Error"),
+			strings.Contains(line, "YoutubeDLError:"),
+			strings.Contains(line, "DownloadError:"),
+			strings.Contains(line, "ExtractorError:"):
+			return line
+		}
+	}
+	return fallback
 }

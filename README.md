@@ -149,6 +149,23 @@ uv run go run ./cmd/textdrain transcribe "https://www.youtube.com/watch?v=CIUtEn
 uv run go run ./cmd/textdrain transcribe "<yt-dlp-compatible-url>" --cookies ./cookies.txt
 ```
 
+Pass additional `yt-dlp` arguments through when a site needs browser impersonation or custom headers:
+
+```bash
+uv run go run ./cmd/textdrain transcribe "https://www.bilibili.com/video/BV19LoeBbEv8" \
+  --yt-dlp-arg=--impersonate \
+  --yt-dlp-arg=chrome
+```
+
+For Bilibili, impersonation alone may still return `HTTP 412`. In that case, pass browser cookies as well:
+
+```bash
+uv run go run ./cmd/textdrain transcribe "https://www.bilibili.com/video/BV19LoeBbEv8" \
+  --cookies-from-browser safari \
+  --yt-dlp-arg=--impersonate \
+  --yt-dlp-arg=chrome
+```
+
 Specify the transcription language:
 
 ```bash

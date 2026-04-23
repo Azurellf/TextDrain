@@ -3,5 +3,6 @@ name = "textdrain"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "curl-cffi>=0.11.4,<0.15",
     "yt-dlp[default]>=2026.3.17",
 ]

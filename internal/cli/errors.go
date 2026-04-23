@@ -181,6 +181,12 @@ func pipelineErrorDetails(stage domain.JobStatus, err error) (ErrorKind, int, st
 	if strings.Contains(reason, "sign in to confirm") || strings.Contains(reason, "not a bot") || strings.Contains(reason, "cookies-from-browser") || strings.Contains(reason, "cookies for the authentication") {
 		return ErrorKindDownload, ExitRuntime, "Pass YouTube login cookies with --cookies-from-browser <browser> or an exported cookies.txt file with --cookies <path>."
 	}
+	if strings.Contains(reason, "impersonate target") || strings.Contains(reason, "list-impersonate-targets") {
+		return ErrorKindDependency, ExitDependency, "The requested yt-dlp impersonation target is unavailable in this environment. Install the optional impersonation dependency and verify it with `uv run yt-dlp --list-impersonate-targets`."
+	}
+	if strings.Contains(reason, "http error 412") || strings.Contains(reason, "precondition failed") {
+		return ErrorKindDownload, ExitRuntime, "The site rejected the metadata request. Retry with browser cookies first, and add yt-dlp flags such as --yt-dlp-arg=--impersonate --yt-dlp-arg=chrome when the site also requires a browser-like client."
+	}
 
 	switch stage {
 	case domain.JobStatusResolving:

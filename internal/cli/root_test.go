@@ -349,6 +349,22 @@ func TestTranscribeRejectsConflictingCookieFlags(t *testing.T) {
 	}
 }
 
+func TestTranscribeParsesRepeatedYTDLPArgs(t *testing.T) {
+	cfg := testConfig(t)
+	output, err := executeTestCommand(t, []string{
+		"transcribe",
+		"https://example.com/video",
+		"--yt-dlp-arg=--impersonate",
+		"--yt-dlp-arg=chrome",
+	}, cfg, &fakeTranscriber{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(output, "job_id=job") {
+		t.Fatalf("transcribe output missing result summary:\n%s", output)
+	}
+}
+
 func TestTranscribeFormatsYTDLPBotCookieAdvice(t *testing.T) {
 	cfg := testConfig(t)
 	transcriber := &fakeTranscriber{
@@ -368,6 +384,62 @@ func TestTranscribeFormatsYTDLPBotCookieAdvice(t *testing.T) {
 		"stage: RESOLVING",
 		"type: download",
 		"advice: Pass YouTube login cookies with --cookies-from-browser <browser>",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestTranscribeFormatsYTDLPHTTP412Advice(t *testing.T) {
+	cfg := testConfig(t)
+	transcriber := &fakeTranscriber{
+		err: &transcription.StageError{
+			Stage: domain.JobStatusResolving,
+			Err:   errors.New("yt-dlp read metadata failed: ERROR: [BiliBili] 19LoeBbEv8: Unable to download JSON metadata: HTTP Error 412: Precondition Failed"),
+		},
+	}
+
+	_, err := executeTestCommand(t, []string{"transcribe", "https://www.bilibili.com/video/BV19LoeBbEv8"}, cfg, transcriber)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+
+	formatted := FormatError(err)
+	for _, want := range []string{
+		"stage: RESOLVING",
+		"type: download",
+		"browser cookies",
+		"--yt-dlp-arg=--impersonate",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestTranscribeFormatsYTDLPImpersonationDependencyAdvice(t *testing.T) {
+	cfg := testConfig(t)
+	transcriber := &fakeTranscriber{
+		err: &transcription.StageError{
+			Stage: domain.JobStatusResolving,
+			Err:   errors.New("yt-dlp read metadata failed: yt_dlp.utils.YoutubeDLError: Impersonate target \"chrome\" is not available. Use --list-impersonate-targets to see available targets. You may be missing dependencies required to support this target."),
+		},
+	}
+
+	_, err := executeTestCommand(t, []string{"transcribe", "https://www.bilibili.com/video/BV19LoeBbEv8"}, cfg, transcriber)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+	if ExitCode(err) != ExitDependency {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitDependency)
+	}
+
+	formatted := FormatError(err)
+	for _, want := range []string{
+		"stage: RESOLVING",
+		"type: dependency",
+		"list-impersonate-targets",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("formatted error does not contain %q:\n%s", want, formatted)
