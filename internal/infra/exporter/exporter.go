@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"textdrain/internal/domain"
 )
@@ -331,7 +332,7 @@ func sanitizeFilename(input string) string {
 	lastDash := false
 	for _, r := range input {
 		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case unicode.IsLetter(r), unicode.IsNumber(r):
 			builder.WriteRune(r)
 			lastDash = false
 		default:

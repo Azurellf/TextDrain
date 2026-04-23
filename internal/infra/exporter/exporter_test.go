@@ -172,6 +172,20 @@ func TestFileExporterFallsBackWithoutURLID(t *testing.T) {
 	assertFile(t, filepath.Join(outputDir, "Bad-Title-Episode-1", "transcript.txt"), "hello\nworld\n")
 }
 
+func TestFileExporterPreservesUnicodeTitleInFolderName(t *testing.T) {
+	outputDir := t.TempDir()
+	transcript := sampleTranscript()
+	transcript.Metadata["id"] = "BV19LoeBbEv8"
+	transcript.Metadata["title"] = "136-求职找工作，可以先混进去再说，追求长期主义"
+	transcript.Metadata["source_type"] = string(domain.SourceTypeURL)
+
+	_, err := New().Export(context.Background(), transcript, outputDir, []domain.OutputFormat{domain.OutputFormatTXT})
+	if err != nil {
+		t.Fatalf("Export() error = %v", err)
+	}
+	assertFile(t, filepath.Join(outputDir, "136-求职找工作-可以先混进去再说-追求长期主义-BV19LoeBbEv8", "transcript.txt"), "hello\nworld\n")
+}
+
 func TestFileExporterOmitsEmptyMetadataFields(t *testing.T) {
 	outputDir := t.TempDir()
 	transcript := domain.Transcript{
