@@ -188,7 +188,7 @@ The TOML parser supports only flat `key = value` assignments. Tables are rejecte
 
 `internal/infra/asr` shells out to `whisper-cli`. It resolves model names through `internal/infra/models`, runs `whisper-cli` with JSON output enabled, parses the generated JSON transcript, and records ASR metadata.
 
-`internal/infra/exporter` writes transcript artifacts. It supports `txt`, `srt`, `vtt`, and `json`, uses atomic temp-file then rename writes, and chooses output filenames from transcript metadata.
+`internal/infra/exporter` writes transcript artifacts. It supports `txt`, `srt`, `vtt`, and `json`, uses atomic temp-file then rename writes, writes fixed transcript filenames inside a resolved output directory, and emits a `metadata.json` file for stable export metadata.
 
 `internal/infra/environment` implements `doctor` checks. It validates `yt-dlp`, `ffmpeg`, `whisper-cli`, and model candidates.
 
@@ -250,10 +250,10 @@ Default paths:
 ~/.config/textdrain/config.toml
 ~/.cache/textdrain/jobs/<job-id>/
 ~/.cache/textdrain/models/
-outputs/<job-id>/
+outputs/<title>-<id>/
 ```
 
-The jobs directory stores temporary downloaded media, normalized audio, and ASR scratch directories. Exported transcripts are written to an explicit `--output` directory or to `outputs/<job-id>/`.
+The jobs directory stores temporary downloaded media, normalized audio, and ASR scratch directories. Exported transcripts are written to an explicit `--output` root with one resolved media subdirectory beneath it, or to `outputs/<title>-<id>/` for URL inputs and `outputs/<title>/` for local files.
 
 ### Transformations
 

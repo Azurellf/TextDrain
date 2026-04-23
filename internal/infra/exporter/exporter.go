@@ -15,12 +15,11 @@ import (
 
 const (
 	defaultBaseName   = "transcript"
+	metadataFileName  = "metadata.json"
 	defaultOutputsDir = "outputs"
 )
 
 var (
-	ErrEmptyOutputDir    = errors.New("export output directory cannot be empty")
-	ErrMissingJobID      = errors.New("export job_id metadata is required for default output directory")
 	ErrUnsupportedFormat = errors.New("unsupported export format")
 )
 
@@ -34,23 +33,18 @@ func New() *FileExporter {
 
 // Export writes the requested transcript formats into outputDir.
 func (e *FileExporter) Export(ctx context.Context, transcript domain.Transcript, outputDir string, formats []domain.OutputFormat) ([]string, error) {
-	outputDir = strings.TrimSpace(outputDir)
-	if outputDir == "" {
-		defaultDir, err := defaultOutputDir(transcript)
-		if err != nil {
-			return nil, err
-		}
-		outputDir = defaultDir
-	}
+	outputDir = resolvedOutputDir(transcript, outputDir)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create export output directory %s: %w", outputDir, err)
 	}
+	if err := writeMetadataFile(outputDir, transcript); err != nil {
+		return nil, err
+	}
 
 	normalizedFormats := normalizeFormats(formats)
-	baseName := transcriptBaseName(transcript)
 	paths := make([]string, 0, len(normalizedFormats))
 	for _, format := range normalizedFormats {
 		if err := ctx.Err(); err != nil {
@@ -61,7 +55,7 @@ func (e *FileExporter) Export(ctx context.Context, transcript domain.Transcript,
 		if err != nil {
 			return nil, err
 		}
-		path := filepath.Join(outputDir, baseName+"."+string(format))
+		path := filepath.Join(outputDir, defaultBaseName+"."+string(format))
 		if err := writeFile(path, content); err != nil {
 			return nil, err
 		}
@@ -87,19 +81,12 @@ func normalizeFormats(formats []domain.OutputFormat) []domain.OutputFormat {
 	return formats
 }
 
-func defaultOutputDir(transcript domain.Transcript) (string, error) {
-	jobID := strings.TrimSpace(transcript.Metadata["job_id"])
-	if jobID == "" {
-		jobID = strings.TrimSpace(transcript.Metadata["job-id"])
+func resolvedOutputDir(transcript domain.Transcript, outputDir string) string {
+	baseDir := strings.TrimSpace(outputDir)
+	if baseDir == "" {
+		baseDir = defaultOutputsDir
 	}
-	if jobID == "" {
-		return "", ErrEmptyOutputDir
-	}
-	jobID = sanitizeFilename(jobID)
-	if jobID == defaultBaseName {
-		return "", ErrMissingJobID
-	}
-	return filepath.Join(defaultOutputsDir, jobID), nil
+	return filepath.Join(baseDir, resolvedFolderName(transcript.Metadata))
 }
 
 func render(transcript domain.Transcript, format domain.OutputFormat) ([]byte, error) {
@@ -269,27 +256,69 @@ func writeFile(path string, content []byte) error {
 	return nil
 }
 
-func transcriptBaseName(transcript domain.Transcript) string {
-	if value := strings.TrimSpace(transcript.Metadata["title"]); value != "" {
-		value = strings.TrimSuffix(value, filepath.Ext(value))
-		if baseName := sanitizeFilename(value); baseName != "" {
-			return baseName
+func writeMetadataFile(outputDir string, transcript domain.Transcript) error {
+	data, err := renderMetadataJSON(transcript.Metadata)
+	if err != nil {
+		return err
+	}
+	return writeFile(filepath.Join(outputDir, metadataFileName), data)
+}
+
+func renderMetadataJSON(metadata map[string]string) ([]byte, error) {
+	payload := map[string]string{}
+	for _, field := range []string{"title", "url", "id", "source_type", "site", "job_id"} {
+		var value string
+		switch field {
+		case "url":
+			value = selectedURL(metadata)
+		default:
+			value = strings.TrimSpace(metadata[field])
+		}
+		if value != "" {
+			payload[field] = value
 		}
 	}
-	for _, key := range []string{"filename", "input_filename", "source_filename", "media_path", "source_path", "input"} {
-		value := strings.TrimSpace(transcript.Metadata[key])
-		if value == "" {
-			continue
-		}
-		if strings.ContainsAny(value, `/\`) {
-			value = filepath.Base(value)
-		}
-		value = strings.TrimSuffix(value, filepath.Ext(value))
-		if baseName := sanitizeFilename(value); baseName != "" {
-			return baseName
+
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode export metadata json: %w", err)
+	}
+	return append(data, '\n'), nil
+}
+
+func resolvedFolderName(metadata map[string]string) string {
+	title := sanitizeTitle(metadata)
+	if title == defaultBaseName {
+		return defaultBaseName
+	}
+
+	if strings.TrimSpace(metadata["source_type"]) != string(domain.SourceTypeURL) {
+		return title
+	}
+
+	id := sanitizeFilename(metadata["id"])
+	if id == defaultBaseName {
+		return title
+	}
+	return sanitizeFilename(title + "-" + id)
+}
+
+func sanitizeTitle(metadata map[string]string) string {
+	title := strings.TrimSpace(metadata["title"])
+	if title == "" {
+		return defaultBaseName
+	}
+	title = strings.TrimSuffix(title, filepath.Ext(title))
+	return sanitizeFilename(title)
+}
+
+func selectedURL(metadata map[string]string) string {
+	for _, key := range []string{"webpage_url", "original_url", "input"} {
+		if value := strings.TrimSpace(metadata[key]); value != "" {
+			return value
 		}
 	}
-	return defaultBaseName
+	return ""
 }
 
 func sanitizeFilename(input string) string {

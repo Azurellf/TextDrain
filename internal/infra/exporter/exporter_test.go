@@ -34,11 +34,12 @@ func TestFileExporterExportsRequestedFormats(t *testing.T) {
 		}
 	}
 
-	assertFile(t, filepath.Join(outputDir, "Bad-Title-Episode-1.txt"), "hello\nworld\n")
-	assertFile(t, filepath.Join(outputDir, "Bad-Title-Episode-1.srt"), "1\n00:00:00,000 --> 00:00:01,240\nhello\n\n2\n00:00:01,240 --> 00:01:01,005\nworld\n")
-	assertFile(t, filepath.Join(outputDir, "Bad-Title-Episode-1.vtt"), "WEBVTT\n\n00:00:00.000 --> 00:00:01.240\nhello\n\n00:00:01.240 --> 00:01:01.005\nworld\n\n")
+	exportDir := filepath.Join(outputDir, "Bad-Title-Episode-1-QsZFBqtgI8A")
+	assertFile(t, filepath.Join(exportDir, "transcript.txt"), "hello\nworld\n")
+	assertFile(t, filepath.Join(exportDir, "transcript.srt"), "1\n00:00:00,000 --> 00:00:01,240\nhello\n\n2\n00:00:01,240 --> 00:01:01,005\nworld\n")
+	assertFile(t, filepath.Join(exportDir, "transcript.vtt"), "WEBVTT\n\n00:00:00.000 --> 00:00:01.240\nhello\n\n00:00:01.240 --> 00:01:01.005\nworld\n\n")
 
-	data := readFile(t, filepath.Join(outputDir, "Bad-Title-Episode-1.json"))
+	data := readFile(t, filepath.Join(exportDir, "transcript.json"))
 	var payload struct {
 		Language string `json:"language"`
 		Text     string `json:"text"`
@@ -70,6 +71,14 @@ func TestFileExporterExportsRequestedFormats(t *testing.T) {
 	if payload.Metadata["title"] != "Bad / Title: Episode 1" {
 		t.Fatalf("payload metadata title = %q, want source title", payload.Metadata["title"])
 	}
+
+	var exportMetadata map[string]string
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(exportDir, "metadata.json"))), &exportMetadata); err != nil {
+		t.Fatalf("Unmarshal(metadata.json) error = %v", err)
+	}
+	if exportMetadata["title"] != "Bad / Title: Episode 1" || exportMetadata["url"] != "https://www.youtube.com/watch?v=QsZFBqtgI8A" {
+		t.Fatalf("metadata.json = %#v, want stable export metadata", exportMetadata)
+	}
 }
 
 func TestFileExporterDefaultsToAllFormats(t *testing.T) {
@@ -82,14 +91,16 @@ func TestFileExporterDefaultsToAllFormats(t *testing.T) {
 	if len(paths) != 4 {
 		t.Fatalf("Export() paths len = %d, want 4", len(paths))
 	}
-	for _, ext := range []string{".txt", ".srt", ".vtt", ".json"} {
-		if _, err := os.Stat(filepath.Join(outputDir, "Bad-Title-Episode-1"+ext)); err != nil {
-			t.Fatalf("Stat(%s) error = %v", ext, err)
+
+	exportDir := filepath.Join(outputDir, "Bad-Title-Episode-1-QsZFBqtgI8A")
+	for _, name := range []string{"transcript.txt", "transcript.srt", "transcript.vtt", "transcript.json", "metadata.json"} {
+		if _, err := os.Stat(filepath.Join(exportDir, name)); err != nil {
+			t.Fatalf("Stat(%s) error = %v", name, err)
 		}
 	}
 }
 
-func TestFileExporterDefaultsOutputDirFromJobID(t *testing.T) {
+func TestFileExporterDefaultsOutputDir(t *testing.T) {
 	previousDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd() error = %v", err)
@@ -104,24 +115,23 @@ func TestFileExporterDefaultsOutputDirFromJobID(t *testing.T) {
 		}
 	})
 
-	transcript := sampleTranscript()
-	transcript.Metadata["job_id"] = "job/001"
-	paths, err := New().Export(context.Background(), transcript, "", []domain.OutputFormat{domain.OutputFormatTXT})
+	paths, err := New().Export(context.Background(), sampleTranscript(), "", []domain.OutputFormat{domain.OutputFormatTXT})
 	if err != nil {
 		t.Fatalf("Export() error = %v", err)
 	}
-	if len(paths) != 1 || filepath.Base(filepath.Dir(paths[0])) != "job-001" || filepath.Base(filepath.Dir(filepath.Dir(paths[0]))) != "outputs" {
-		t.Fatalf("Export() paths = %#v, want default outputs/job-001 directory", paths)
+	if len(paths) != 1 || filepath.Base(filepath.Dir(paths[0])) != "Bad-Title-Episode-1-QsZFBqtgI8A" || filepath.Base(filepath.Dir(filepath.Dir(paths[0]))) != "outputs" {
+		t.Fatalf("Export() paths = %#v, want default outputs/title-id directory", paths)
 	}
 	assertFile(t, paths[0], "hello\nworld\n")
 }
 
-func TestFileExporterFallsBackToFilenameAndTranscriptName(t *testing.T) {
+func TestFileExporterUsesTitleFolderForLocalInput(t *testing.T) {
 	outputDir := t.TempDir()
 	transcript := domain.Transcript{
 		Text: "text",
 		Metadata: map[string]string{
-			"filename": "/tmp/Local Clip.mp4",
+			"title":       "Local Clip",
+			"source_type": string(domain.SourceTypeLocalFile),
 		},
 	}
 
@@ -129,23 +139,65 @@ func TestFileExporterFallsBackToFilenameAndTranscriptName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Export() error = %v", err)
 	}
-	assertFile(t, filepath.Join(outputDir, "Local-Clip.txt"), "text\n")
+	assertFile(t, filepath.Join(outputDir, "Local-Clip", "transcript.txt"), "text\n")
 
-	outputDir = t.TempDir()
-	_, err = New().Export(context.Background(), domain.Transcript{Text: "text"}, outputDir, []domain.OutputFormat{domain.OutputFormatTXT})
+	var exportMetadata map[string]string
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(outputDir, "Local-Clip", "metadata.json"))), &exportMetadata); err != nil {
+		t.Fatalf("Unmarshal(metadata.json) error = %v", err)
+	}
+	if exportMetadata["title"] != "Local Clip" || exportMetadata["source_type"] != "local_file" {
+		t.Fatalf("metadata.json = %#v, want local title metadata", exportMetadata)
+	}
+}
+
+func TestFileExporterFallsBackToTranscriptDirectory(t *testing.T) {
+	outputDir := t.TempDir()
+
+	_, err := New().Export(context.Background(), domain.Transcript{Text: "text"}, outputDir, []domain.OutputFormat{domain.OutputFormatTXT})
 	if err != nil {
 		t.Fatalf("Export() error = %v", err)
 	}
-	assertFile(t, filepath.Join(outputDir, "transcript.txt"), "text\n")
+	assertFile(t, filepath.Join(outputDir, "transcript", "transcript.txt"), "text\n")
+}
+
+func TestFileExporterFallsBackWithoutURLID(t *testing.T) {
+	outputDir := t.TempDir()
+	transcript := sampleTranscript()
+	delete(transcript.Metadata, "id")
+
+	_, err := New().Export(context.Background(), transcript, outputDir, []domain.OutputFormat{domain.OutputFormatTXT})
+	if err != nil {
+		t.Fatalf("Export() error = %v", err)
+	}
+	assertFile(t, filepath.Join(outputDir, "Bad-Title-Episode-1", "transcript.txt"), "hello\nworld\n")
+}
+
+func TestFileExporterOmitsEmptyMetadataFields(t *testing.T) {
+	outputDir := t.TempDir()
+	transcript := domain.Transcript{
+		Text: "text",
+		Metadata: map[string]string{
+			"source_type": string(domain.SourceTypeURL),
+			"input":       "https://example.com/watch?v=1",
+		},
+	}
+
+	_, err := New().Export(context.Background(), transcript, outputDir, []domain.OutputFormat{domain.OutputFormatTXT})
+	if err != nil {
+		t.Fatalf("Export() error = %v", err)
+	}
+
+	var exportMetadata map[string]string
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(outputDir, "transcript", "metadata.json"))), &exportMetadata); err != nil {
+		t.Fatalf("Unmarshal(metadata.json) error = %v", err)
+	}
+	if len(exportMetadata) != 2 || exportMetadata["url"] != "https://example.com/watch?v=1" || exportMetadata["source_type"] != "url" {
+		t.Fatalf("metadata.json = %#v, want only non-empty fields", exportMetadata)
+	}
 }
 
 func TestFileExporterRejectsInvalidInput(t *testing.T) {
-	_, err := New().Export(context.Background(), sampleTranscript(), "", []domain.OutputFormat{domain.OutputFormatTXT})
-	if !errors.Is(err, ErrEmptyOutputDir) {
-		t.Fatalf("Export() error = %v, want ErrEmptyOutputDir", err)
-	}
-
-	_, err = New().Export(context.Background(), sampleTranscript(), t.TempDir(), []domain.OutputFormat{"docx"})
+	_, err := New().Export(context.Background(), sampleTranscript(), t.TempDir(), []domain.OutputFormat{"docx"})
 	if !errors.Is(err, ErrUnsupportedFormat) {
 		t.Fatalf("Export() error = %v, want ErrUnsupportedFormat", err)
 	}
@@ -173,7 +225,7 @@ func TestFileExporterTXTJoinsSegmentsWhenTextMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Export() error = %v", err)
 	}
-	assertFile(t, filepath.Join(outputDir, "Bad-Title-Episode-1.txt"), "hello\nworld\n")
+	assertFile(t, filepath.Join(outputDir, "Bad-Title-Episode-1-QsZFBqtgI8A", "transcript.txt"), "hello\nworld\n")
 }
 
 func sampleTranscript() domain.Transcript {
@@ -190,7 +242,13 @@ func sampleTranscript() domain.Transcript {
 			LanguageMode: "auto",
 		},
 		Metadata: map[string]string{
-			"title": "Bad / Title: Episode 1",
+			"title":        "Bad / Title: Episode 1",
+			"id":           "QsZFBqtgI8A",
+			"source_type":  string(domain.SourceTypeURL),
+			"webpage_url":  "https://www.youtube.com/watch?v=QsZFBqtgI8A",
+			"original_url": "https://youtu.be/QsZFBqtgI8A",
+			"site":         "youtube",
+			"job_id":       "job-001",
 		},
 	}
 }

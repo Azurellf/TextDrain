@@ -114,7 +114,9 @@ Supported flags:
 
 The command resolves the input, downloads URL media when needed, prepares normalized audio with `ffmpeg`, transcribes with `whisper-cli`, exports the configured transcript formats, and removes intermediate media unless `--keep-intermediate` is set.
 
-If `--output` is omitted, exports are written under `outputs/<job-id>/` from the current working directory.
+If `--output` is omitted, exports are written under `outputs/<title>-<id>/` for URL inputs or `outputs/<title>/` for local files.
+
+If `--output <dir>` is provided, TextDrain treats it as the output root and creates one additional subdirectory for the resolved media title, for example `<dir>/<title>-<id>/`.
 
 For sites that require a signed-in browser session, pass cookies through to `yt-dlp`:
 
