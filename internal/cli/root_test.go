@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,6 +26,16 @@ func TestRootHelpIncludesCommandSurface(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output does not contain %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestRootHelpIncludesClearCacheCommand(t *testing.T) {
+	output, err := executeTestCommandWithInput(t, []string{"--help"}, testConfig(t), nil, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(output, "clear-cache") {
+		t.Fatalf("help output does not contain clear-cache:\n%s", output)
 	}
 }
 
@@ -457,6 +468,165 @@ func TestDoctorRejectsArguments(t *testing.T) {
 	}
 }
 
+func TestClearCacheRejectsArguments(t *testing.T) {
+	_, err := executeTestCommandWithInput(t, []string{"clear-cache", "extra"}, testConfig(t), nil, nil)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+	if ExitCode(err) != ExitParameter {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitParameter)
+	}
+}
+
+func TestClearCacheConfirmedRemovesContentsAndKeepsJobsDir(t *testing.T) {
+	cfg := testConfig(t)
+	if err := os.MkdirAll(filepath.Join(cfg.JobsDir, "nested"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.JobsDir, "job.txt"), []byte("job"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.JobsDir, "nested", "child.txt"), []byte("child"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := executeTestCommandWithInput(t, []string{"clear-cache"}, cfg, nil, strings.NewReader("Y\n"))
+	if err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "Clear cached jobs in "+filepath.Clean(cfg.JobsDir)+"? [y/N]: ") {
+		t.Fatalf("clear-cache output missing prompt:\n%s", output)
+	}
+
+	entries, err := os.ReadDir(cfg.JobsDir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("jobs dir still contains entries: %#v", entries)
+	}
+}
+
+func TestClearCacheNonConfirmationDoesNothing(t *testing.T) {
+	cfg := testConfig(t)
+	if err := os.MkdirAll(cfg.JobsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	jobFile := filepath.Join(cfg.JobsDir, "job.txt")
+	if err := os.WriteFile(jobFile, []byte("job"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := executeTestCommandWithInput(t, []string{"clear-cache"}, cfg, nil, strings.NewReader("n\n"))
+	if err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, output)
+	}
+
+	if _, err := os.Stat(jobFile); err != nil {
+		t.Fatalf("Stat() error = %v, want existing cache entry", err)
+	}
+}
+
+func TestClearCacheEmptyResponseDoesNothing(t *testing.T) {
+	cfg := testConfig(t)
+	if err := os.MkdirAll(cfg.JobsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	jobFile := filepath.Join(cfg.JobsDir, "job.txt")
+	if err := os.WriteFile(jobFile, []byte("job"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := executeTestCommandWithInput(t, []string{"clear-cache"}, cfg, nil, strings.NewReader("\n"))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if _, err := os.Stat(jobFile); err != nil {
+		t.Fatalf("Stat() error = %v, want existing cache entry", err)
+	}
+}
+
+func TestClearCachePromptUsesEnglishAndAbsolutePath(t *testing.T) {
+	cfg := testConfig(t)
+
+	output, err := executeTestCommandWithInput(t, []string{"clear-cache"}, cfg, nil, strings.NewReader("n\n"))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	want := "Clear cached jobs in " + filepath.Clean(cfg.JobsDir) + "? [y/N]: "
+	if !strings.Contains(output, want) {
+		t.Fatalf("clear-cache prompt = %q, want substring %q", output, want)
+	}
+}
+
+func TestClearCacheMissingJobsDirIsSuccessfulNoOp(t *testing.T) {
+	cfg := testConfig(t)
+	if err := os.RemoveAll(cfg.JobsDir); err != nil {
+		t.Fatalf("RemoveAll() error = %v", err)
+	}
+
+	output, err := executeTestCommandWithInput(t, []string{"clear-cache"}, cfg, nil, strings.NewReader("y\n"))
+	if err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, output)
+	}
+
+	info, err := os.Stat(cfg.JobsDir)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("jobs path is not a directory after clear-cache")
+	}
+}
+
+func TestClearCacheDeletionFailureReturnsRuntimeError(t *testing.T) {
+	cfg := testConfig(t)
+	if err := os.MkdirAll(cfg.JobsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.JobsDir, "job.txt"), []byte("job"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(cfg.JobsDir, 0o555); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(cfg.JobsDir, 0o755)
+	})
+
+	_, err := executeTestCommandWithInput(t, []string{"clear-cache"}, cfg, nil, strings.NewReader("y\n"))
+	if err == nil {
+		t.Fatal("Execute() error = nil, want runtime error")
+	}
+	if ExitCode(err) != ExitRuntime {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitRuntime)
+	}
+}
+
+func TestClearCacheCreateFailureReturnsRuntimeError(t *testing.T) {
+	cfg := testConfig(t)
+	parent := filepath.Dir(cfg.JobsDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(parent, 0o755)
+	})
+
+	_, err := executeTestCommandWithInput(t, []string{"clear-cache"}, cfg, nil, strings.NewReader("y\n"))
+	if err == nil {
+		t.Fatal("Execute() error = nil, want runtime error")
+	}
+	if ExitCode(err) != ExitRuntime {
+		t.Fatalf("ExitCode() = %d, want %d", ExitCode(err), ExitRuntime)
+	}
+}
+
 func TestDoctorReportsMissingDependencies(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
@@ -572,6 +742,10 @@ func TestExitCodeDefaultsToRuntimeForUnclassifiedErrors(t *testing.T) {
 }
 
 func executeTestCommand(t *testing.T, args []string, cfg config.Config, transcriber Transcriber) (string, error) {
+	return executeTestCommandWithInput(t, args, cfg, transcriber, nil)
+}
+
+func executeTestCommandWithInput(t *testing.T, args []string, cfg config.Config, transcriber Transcriber, stdin io.Reader) (string, error) {
 	t.Helper()
 
 	var stdout bytes.Buffer
@@ -580,6 +754,7 @@ func executeTestCommand(t *testing.T, args []string, cfg config.Config, transcri
 		Paths:       testPaths(t),
 		Config:      cfg,
 		UI:          NewUI(&stdout, &stderr),
+		Stdin:       stdin,
 		Transcriber: transcriber,
 	})
 	cmd.SetArgs(args)

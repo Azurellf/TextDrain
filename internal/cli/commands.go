@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -185,6 +187,71 @@ func newDoctorCommand(paths config.Paths, cfg config.Config) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newClearCacheCommand(cfg config.Config) *cobra.Command {
+	return &cobra.Command{
+		Use:   "clear-cache",
+		Short: "Clear cached job data",
+		Long:  "Clear the configured TextDrain job cache directory after interactive confirmation.",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return NewParameterError("clear-cache does not accept positional arguments")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			target := filepath.Clean(cfg.JobsDir)
+			confirmed, err := confirmClearCache(cmd, target)
+			if err != nil {
+				return NewRuntimeError("read clear-cache confirmation: %w", err)
+			}
+			if !confirmed {
+				return nil
+			}
+			if err := clearDirectoryContents(target); err != nil {
+				return NewRuntimeError("clear job cache %s: %w", target, err)
+			}
+			return nil
+		},
+	}
+}
+
+func confirmClearCache(cmd *cobra.Command, target string) (bool, error) {
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Clear cached jobs in %s? [y/N]: ", target); err != nil {
+		return false, err
+	}
+
+	reader := bufio.NewReader(cmd.InOrStdin())
+	input, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+
+	return strings.EqualFold(strings.TrimSpace(input), "y"), nil
+}
+
+func clearDirectoryContents(path string) error {
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(path, entry.Name())); err != nil {
+			return err
+		}
+	}
+
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func newModelsCommand(cfg config.Config) *cobra.Command {

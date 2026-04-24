@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +15,7 @@ type RootOptions struct {
 	Paths       config.Paths
 	Config      config.Config
 	UI          *UI
+	Stdin       io.Reader
 	Transcriber Transcriber
 }
 
@@ -44,11 +46,15 @@ func NewRootCommand(_ context.Context, opts RootOptions) *cobra.Command {
 		cmd.SetOut(opts.UI.Stdout)
 		cmd.SetErr(opts.UI.Stderr)
 	}
+	if opts.Stdin != nil {
+		cmd.SetIn(opts.Stdin)
+	}
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return NewParameterError("%s", err)
 	})
 
 	cmd.AddCommand(newPathsCommand(opts.Paths, cfg))
+	cmd.AddCommand(newClearCacheCommand(cfg))
 	cmd.AddCommand(newTranscribeCommand(cfg, opts.Transcriber))
 	cmd.AddCommand(newDoctorCommand(opts.Paths, cfg))
 	cmd.AddCommand(newModelsCommand(cfg))
