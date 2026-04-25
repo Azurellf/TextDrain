@@ -145,7 +145,7 @@ uv run go run ./cmd/textdrain transcribe "<yt-dlp-compatible-url>"
 Use browser cookies for sites that require a signed-in session:
 
 ```bash
-uv run go run ./cmd/textdrain transcribe "https://www.youtube.com/watch?v=CIUtEnnjA2U" --cookies-from-browser safari
+uv run go run ./cmd/textdrain transcribe "https://www.youtube.com/watch?v=CIUtEnnjA2U" --cookies-from-browser chrome
 uv run go run ./cmd/textdrain transcribe "<yt-dlp-compatible-url>" --cookies ./cookies.txt
 ```
 
@@ -161,7 +161,7 @@ For Bilibili, impersonation alone may still return `HTTP 412`. In that case, pas
 
 ```bash
 uv run go run ./cmd/textdrain transcribe "https://www.bilibili.com/video/BV19LoeBbEv8" \
-  --cookies-from-browser safari \
+  --cookies-from-browser chrome \
   --yt-dlp-arg=--impersonate \
   --yt-dlp-arg=chrome
 ```
@@ -331,7 +331,7 @@ If `yt-dlp` reports `No supported JavaScript runtime could be found`, install `d
 If YouTube reports `Sign in to confirm you're not a bot`, pass browser cookies from a signed-in browser profile:
 
 ```bash
-uv run go run ./cmd/textdrain transcribe "https://www.youtube.com/watch?v=CIUtEnnjA2U" --cookies-from-browser safari
+uv run go run ./cmd/textdrain transcribe "https://www.youtube.com/watch?v=CIUtEnnjA2U" --cookies-from-browser chrome
 ```
 
 You can also export a cookies.txt file and pass it with `--cookies ./cookies.txt`.
